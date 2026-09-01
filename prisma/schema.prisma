@@ -1,0 +1,327 @@
+// Nexora relational schema.
+//
+// Datasource is SQLite for zero-setup local dev/tests. To run against
+// Postgres in production: change `provider` below to "postgresql", point
+// DATABASE_URL at a Postgres instance, and (optionally) convert the string
+// "enum-like" fields marked below into native Prisma `enum`s — SQLite does
+// not support Prisma enums, so this schema documents allowed values in
+// comments and enforces them with Zod at the application layer instead.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// role: "OWNER" | "STAFF" | "SUPER_ADMIN"
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("OWNER")
+  createdAt    DateTime @default(now())
+
+  ownedOrganizations Organization[] @relation("OrgOwner")
+  memberships        Member[]
+  auditLogs          AuditLog[]
+
+  @@index([role])
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  owner     User     @relation("OrgOwner", fields: [ownerId], references: [id])
+  createdAt DateTime @default(now())
+
+  members       Member[]
+  stores        Store[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@index([ownerId])
+}
+
+// role: "OWNER" | "STAFF"; status: "active" | "invited" | "suspended"
+model Member {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String   @default("STAFF")
+  status         String   @default("active")
+  createdAt      DateTime @default(now())
+
+  user             User              @relation(fields: [userId], references: [id])
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  storeAssignments StoreAssignment[]
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+model StoreAssignment {
+  id        String   @id @default(cuid())
+  memberId  String
+  storeId   String
+  // JSON: { viewOrders, manageOrders, viewProducts, manageProducts, viewCustomers }
+  permissions String
+  createdAt DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id])
+  store  Store  @relation(fields: [storeId], references: [id])
+
+  @@unique([memberId, storeId])
+  @@index([storeId])
+}
+
+// type: "restaurant" | "fashion" | "retail" | "electronics" | "other"
+// status: "connected" | "warning" | "disconnected"
+model Store {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  logoUrl        String?
+  type           String    @default("other")
+  status         String    @default("disconnected")
+  lastSyncAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  integrations      Integration[]
+  apiKeys           ApiKey[]
+  webhookEndpoints  WebhookEndpoint[]
+  webhookEvents     WebhookEvent[]
+  orders            Order[]
+  products          Product[]
+  inventory         Inventory[]
+  customers         Customer[]
+  notifications     Notification[]
+  integrationLogs   IntegrationLog[]
+  storeAssignments  StoreAssignment[]
+
+  @@index([organizationId])
+}
+
+// provider: "custom_api" | "custom_webhook" | "js_sdk" | "woocommerce" | "shopify"
+// status: "connected" | "warning" | "disconnected"
+model Integration {
+  id                String    @id @default(cuid())
+  storeId           String
+  provider          String
+  status            String    @default("disconnected")
+  lastRequestAt     DateTime?
+  lastWebhookAt     DateTime?
+  lastSyncAt        DateTime?
+  failedRequestCount Int      @default(0)
+  config            String    @default("{}")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  store           Store            @relation(fields: [storeId], references: [id])
+  apiKeys         ApiKey[]
+  integrationLogs IntegrationLog[]
+
+  @@index([storeId])
+}
+
+// scopes: JSON array of "orders:write" | "products:write" | "inventory:write" | "customers:write" | "read"
+model ApiKey {
+  id            String    @id @default(cuid())
+  storeId       String
+  integrationId String
+  name          String
+  keyPrefix     String
+  keyHash       String    @unique
+  scopes        String    @default("[]")
+  revokedAt     DateTime?
+  lastUsedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  store       Store       @relation(fields: [storeId], references: [id])
+  integration Integration @relation(fields: [integrationId], references: [id])
+
+  @@index([storeId])
+  @@index([integrationId])
+}
+
+model WebhookEndpoint {
+  id                String   @id @default(cuid())
+  storeId           String
+  // AES-256-GCM ciphertext (see src/lib/crypto.ts), NOT a one-way hash —
+  // verifying an inbound HMAC signature requires recovering the plaintext
+  // secret, unlike API keys/passwords which only need hash comparison.
+  secretCiphertext  String
+  description       String   @default("Nexora inbound webhook secret")
+  createdAt         DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+}
+
+// eventType: "order.created" | "order.updated" | "order.cancelled" |
+//            "product.created" | "product.updated" | "product.deleted" |
+//            "inventory.updated" | "customer.created" | "customer.updated"
+// status: "received" | "processed" | "failed" | "duplicate"
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  storeId    String
+  eventId    String
+  eventType  String
+  payload    String
+  status     String   @default("received")
+  receivedAt DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, eventId])
+  @@index([storeId])
+}
+
+// status: "pending" | "confirmed" | "preparing" | "shipped" | "delivered" | "cancelled"
+// paymentStatus: "unpaid" | "paid" | "refunded"
+model Order {
+  id               String    @id @default(cuid())
+  storeId          String
+  externalId       String
+  customerId       String?
+  customerName     String
+  status           String    @default("pending")
+  paymentStatus    String    @default("unpaid")
+  total            Int
+  currency         String    @default("NGN")
+  deliveryAddress  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  store    Store      @relation(fields: [storeId], references: [id])
+  customer Customer?  @relation(fields: [customerId], references: [id])
+  items    OrderItem[]
+
+  @@unique([storeId, externalId])
+  @@index([storeId])
+  @@index([storeId, status])
+}
+
+model OrderItem {
+  id        String @id @default(cuid())
+  orderId   String
+  productId String?
+  name      String
+  quantity  Int
+  price     Int
+
+  order   Order    @relation(fields: [orderId], references: [id])
+  product Product? @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  storeId   String
+  sku       String
+  name      String
+  price     Int
+  currency  String   @default("NGN")
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store      Store       @relation(fields: [storeId], references: [id])
+  inventory  Inventory?
+  orderItems OrderItem[]
+
+  @@unique([storeId, sku])
+  @@index([storeId])
+}
+
+model Inventory {
+  id                String   @id @default(cuid())
+  productId         String   @unique
+  storeId           String
+  quantity          Int      @default(0)
+  lowStockThreshold Int      @default(5)
+  updatedAt         DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+  store   Store   @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  storeId    String
+  externalId String
+  name       String
+  email      String?
+  phone      String?
+  createdAt  DateTime @default(now())
+
+  store  Store   @relation(fields: [storeId], references: [id])
+  orders Order[]
+
+  @@unique([storeId, externalId])
+  @@index([storeId])
+}
+
+// severity: "info" | "warning" | "critical"
+model Notification {
+  id             String    @id @default(cuid())
+  organizationId String
+  storeId        String?
+  type           String
+  title          String
+  body           String
+  severity       String    @default("info")
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  store        Store?       @relation(fields: [storeId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, readAt])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String?
+  actorUserId    String?
+  action         String
+  targetType     String
+  targetId       String?
+  metadata       String   @default("{}")
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  actor        User?         @relation(fields: [actorUserId], references: [id])
+
+  @@index([organizationId])
+  @@index([actorUserId])
+}
+
+// direction: "inbound" | "outbound"; level: "info" | "warning" | "error"
+model IntegrationLog {
+  id            String   @id @default(cuid())
+  storeId       String
+  integrationId String?
+  direction     String
+  level         String   @default("info")
+  message       String
+  metadata      String   @default("{}")
+  createdAt     DateTime @default(now())
+
+  store       Store        @relation(fields: [storeId], references: [id])
+  integration Integration? @relation(fields: [integrationId], references: [id])
+
+  @@index([storeId])
+  @@index([integrationId])
+}
