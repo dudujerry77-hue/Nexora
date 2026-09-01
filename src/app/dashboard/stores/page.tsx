@@ -35,14 +35,14 @@ export default function StoresPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Stores</h1>
           <p className="text-sm text-[rgb(var(--text-muted))]">Every website or app connected to Nexora.</p>
         </div>
         <button
           onClick={() => setShowForm((v) => !v)}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
         >
           + New store
         </button>
@@ -96,8 +96,8 @@ export default function StoresPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {stores.map((store) => (
             <Link key={store.id} href={`/dashboard/stores/${store.id}`} className="card block p-5 hover:border-brand-500">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold">{store.name}</h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="min-w-0 truncate font-semibold">{store.name}</h3>
                 <ConnectionBadge status={store.status} />
               </div>
               <p className="mt-1 text-xs capitalize text-[rgb(var(--text-muted))]">{store.type}</p>

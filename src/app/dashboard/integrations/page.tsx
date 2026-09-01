@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Plug, ShoppingCart, ShoppingBag, type LucideIcon } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
+import { useStoreScope } from '@/lib/useStores';
 import { ConnectionBadge, EmptyState, ErrorState, LoadingSkeleton } from '@/components/dashboard/ui';
 
 interface Integration {
@@ -25,17 +26,22 @@ const PLANNED_CONNECTORS: { label: string; icon: LucideIcon }[] = [
 ];
 
 export default function IntegrationsPage() {
+  const { selectedStoreId } = useStoreScope();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<Integration[]>('/api/integrations').then((res) => {
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams();
+    if (selectedStoreId) params.set('storeId', selectedStoreId);
+    apiFetch<Integration[]>(`/api/integrations?${params.toString()}`).then((res) => {
       if (res.error) setError(res.error.message);
       else setIntegrations(res.data ?? []);
       setLoading(false);
     });
-  }, []);
+  }, [selectedStoreId]);
 
   return (
     <div className="space-y-8">

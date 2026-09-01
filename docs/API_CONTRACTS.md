@@ -105,7 +105,7 @@ Never accepts a secret key, and only ever logs to `integration_logs` — see
 ## Notifications
 
 ```
-GET  /api/notifications?unreadOnly=          (session)
+GET  /api/notifications?unreadOnly=&storeId=  (session)
 POST /api/notifications/:id/read             (session)
 GET  /api/notifications/stream               (session, Server-Sent Events)  -> live push
 ```

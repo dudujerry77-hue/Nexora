@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Bell, AlertTriangle, AlertOctagon, type LucideIcon } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
+import { useStoreScope } from '@/lib/useStores';
 import { EmptyState, ErrorState, LoadingSkeleton } from '@/components/dashboard/ui';
 
 interface Notification {
@@ -21,17 +22,22 @@ const SEVERITY_ICON: Record<Notification['severity'], { icon: LucideIcon; classN
 };
 
 export default function NotificationsPage() {
+  const { selectedStoreId } = useStoreScope();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<Notification[]>('/api/notifications').then((res) => {
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams();
+    if (selectedStoreId) params.set('storeId', selectedStoreId);
+    apiFetch<Notification[]>(`/api/notifications?${params.toString()}`).then((res) => {
       if (res.error) setError(res.error.message);
       else setNotifications(res.data ?? []);
       setLoading(false);
     });
-  }, []);
+  }, [selectedStoreId]);
 
   async function markRead(id: string) {
     await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });

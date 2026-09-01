@@ -68,12 +68,12 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Products</h1>
           <p className="text-sm text-[rgb(var(--text-muted))]">Products synced from your connected stores.</p>
         </div>
-        <button onClick={() => setShowForm((v) => !v)} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
+        <button onClick={() => setShowForm((v) => !v)} className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
           + New product
         </button>
       </div>
