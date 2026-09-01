@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { requireSession, requireApiKey, getAccessibleStoreIds, assertStoreAccess } from '@/lib/authz';
@@ -7,7 +7,15 @@ import { ok, fail } from '@/lib/apiResponse';
 import { ApiError } from '@/lib/errors';
 import { consume } from '@/lib/rateLimit';
 import { ingestOrder } from '@/lib/orderService';
+import { withDevCors, devCorsPreflight } from '@/lib/cors';
 import type { CanonicalOrder } from '@/lib/connectors/types';
+
+// A browser-based external site (as opposed to a server-to-server
+// integration, which never triggers CORS) needs this preflight answered
+// before it can POST an order — see src/lib/cors.ts.
+export async function OPTIONS(req: NextRequest) {
+  return devCorsPreflight(req, 'POST, OPTIONS');
+}
 
 // These routes read the session cookie, so they can never be statically
 // generated — declare that explicitly to avoid Next's build-time
@@ -66,6 +74,7 @@ function toCanonicalOrder(body: ReturnType<typeof createOrderSchema.parse>): Can
 }
 
 export async function POST(req: NextRequest) {
+  let response: NextResponse;
   try {
     const authHeader = req.headers.get('authorization');
 
@@ -83,18 +92,19 @@ export async function POST(req: NextRequest) {
         data: { lastRequestAt: new Date() },
       });
       const order = await ingestOrder(apiKeyCtx.storeId, toCanonicalOrder(body));
-      return ok(order, 201);
+      response = ok(order, 201);
+    } else {
+      const { member } = await requireSession(req);
+      if (member.role !== 'OWNER') {
+        throw new ApiError('forbidden', 'Only owners can manually create orders from the dashboard.');
+      }
+      const body = createOrderSchema.parse(await req.json());
+      await assertStoreAccess({ member, storeId: body.storeId });
+      const order = await ingestOrder(body.storeId, toCanonicalOrder(body));
+      response = ok(order, 201);
     }
-
-    const { member } = await requireSession(req);
-    if (member.role !== 'OWNER') {
-      throw new ApiError('forbidden', 'Only owners can manually create orders from the dashboard.');
-    }
-    const body = createOrderSchema.parse(await req.json());
-    await assertStoreAccess({ member, storeId: body.storeId });
-    const order = await ingestOrder(body.storeId, toCanonicalOrder(body));
-    return ok(order, 201);
   } catch (error) {
-    return fail(error);
+    response = fail(error);
   }
+  return withDevCors(req, response);
 }

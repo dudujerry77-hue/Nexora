@@ -14,12 +14,27 @@ import { apiFetch } from '@/lib/apiClient';
 
 const SELECTED_STORE_KEY = 'nexora-selected-store';
 const SIDEBAR_COLLAPSED_KEY = 'nexora-sidebar-collapsed';
+// Persisted as a distinct sentinel (rather than simply absent) so "All
+// Stores" is only ever shown because the user explicitly chose it —
+// distinguishing that from "no preference recorded yet" is what lets a
+// first-time load default to an actual connected store instead.
+const ALL_STORES_SENTINEL = 'all';
 
+/** Returns the persisted store id, or null for "All Stores" / no preference yet. */
 function readStoredStoreId(): string | null {
   try {
-    return localStorage.getItem(SELECTED_STORE_KEY);
+    const stored = localStorage.getItem(SELECTED_STORE_KEY);
+    return stored && stored !== ALL_STORES_SENTINEL ? stored : null;
   } catch {
     return null;
+  }
+}
+
+function hasStoredPreference(): boolean {
+  try {
+    return localStorage.getItem(SELECTED_STORE_KEY) !== null;
+  } catch {
+    return false;
   }
 }
 
@@ -30,9 +45,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Lazy-initialized from localStorage so the selected store survives a
   // full page refresh, not just client-side navigation. Validated against
   // the loaded store list below once it arrives (e.g. a store since
-  // deleted, or belonging to a different account, falls back to "All
-  // Stores" rather than silently scoping to a nonexistent id).
+  // deleted, or belonging to a different account, falls back to the
+  // first-load default rather than silently scoping to a nonexistent id).
   const [selectedStoreId, setSelectedStoreIdState] = useState<string | null>(readStoredStoreId);
+  // Tracks whether the user (or the one-time default below) has ever
+  // recorded an explicit preference, so "All Stores" only ever appears
+  // because it was actually chosen — never as an unset default once
+  // connected stores exist.
+  const [hasPreference, setHasPreference] = useState<boolean>(hasStoredPreference);
   const [storesLoading, setStoresLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -47,9 +67,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const setSelectedStoreId = useCallback((id: string | null) => {
     setSelectedStoreIdState(id);
+    setHasPreference(true);
     try {
-      if (id) localStorage.setItem(SELECTED_STORE_KEY, id);
-      else localStorage.removeItem(SELECTED_STORE_KEY);
+      localStorage.setItem(SELECTED_STORE_KEY, id ?? ALL_STORES_SENTINEL);
     } catch {
       // localStorage unavailable — selection still works for this session.
     }
@@ -71,15 +91,30 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!sessionLoading) refresh();
   }, [sessionLoading, session, router, refresh]);
 
-  // Once the real store list loads, drop a persisted selection that no
+  // Once the real store list loads: drop a persisted selection that no
   // longer refers to a store this account can see (deleted, or restored
-  // from a different account's browser profile).
+  // from a different account's browser profile) — this also clears
+  // `hasPreference` so the default below re-applies rather than sticking
+  // on an empty "All Stores" state. Separately, if no preference has ever
+  // been recorded (a first-time login) and at least one store exists,
+  // default to the first connected store rather than "All Stores" — "All
+  // Stores" is only ever shown when a user explicitly picks it.
   useEffect(() => {
     if (storesLoading) return;
     if (selectedStoreId && !stores.some((s) => s.id === selectedStoreId)) {
-      setSelectedStoreId(null);
+      setSelectedStoreIdState(null);
+      setHasPreference(false);
+      try {
+        localStorage.removeItem(SELECTED_STORE_KEY);
+      } catch {
+        // ignore
+      }
+      return;
     }
-  }, [storesLoading, stores, selectedStoreId, setSelectedStoreId]);
+    if (!hasPreference && !selectedStoreId && stores.length > 0) {
+      setSelectedStoreId(stores[0].id);
+    }
+  }, [storesLoading, stores, selectedStoreId, hasPreference, setSelectedStoreId]);
 
   function toggleSidebarCollapsed() {
     const next = !sidebarCollapsed;

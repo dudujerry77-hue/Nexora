@@ -93,6 +93,18 @@ POST /api/webhooks/customers    events: customer.created | customer.updated
 See `docs/WEBHOOKS.md` for the envelope, signature scheme, and idempotency
 rules.
 
+### CORS (development only)
+
+`POST /api/orders` and `POST /api/webhooks/orders` answer a CORS preflight
+and echo `Access-Control-Allow-Origin` only when `NODE_ENV !== 'production'`
+and the request's `Origin` is `http://127.0.0.1:5500` or
+`http://localhost:5500` (see `src/lib/cors.ts`) — enough to drive these
+endpoints from a browser-based local test page (e.g. VS Code "Live
+Server"). A real integration is expected to call these endpoints
+server-to-server, where CORS never applies; this allowlist is never `*`
+and never active in production, and it does not relax API-key validation,
+CSRF, rate limiting, or signature verification in any way.
+
 ## SDK collector (public key only, read-scope, CORS-enabled)
 
 ```

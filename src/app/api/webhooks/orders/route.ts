@@ -1,22 +1,31 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { webhookOrderPayloadSchema } from '@/lib/validation';
 import { authenticateAndDedupeWebhook, markWebhookProcessed, markWebhookFailed } from '@/lib/webhookAuth';
 import { ingestOrder, updateOrderByExternalId } from '@/lib/orderService';
 import { connectorRegistry } from '@/lib/connectors';
 import { ok, fail } from '@/lib/apiResponse';
+import { withDevCors, devCorsPreflight } from '@/lib/cors';
+
+// A browser-based external site (as opposed to a server-to-server
+// integration, which never triggers CORS) needs this preflight answered
+// before it can POST a webhook — see src/lib/cors.ts.
+export async function OPTIONS(req: NextRequest) {
+  return devCorsPreflight(req, 'POST, OPTIONS');
+}
 
 export async function POST(req: NextRequest) {
   let ctx;
   try {
     ctx = await authenticateAndDedupeWebhook(req, webhookOrderPayloadSchema, 'orders:write');
   } catch (error) {
-    return fail(error);
+    return withDevCors(req, fail(error));
   }
 
   if (ctx.isDuplicate) {
-    return ok({ status: 'duplicate' });
+    return withDevCors(req, ok({ status: 'duplicate' }));
   }
 
+  let response: NextResponse;
   try {
     const { envelope, storeId } = ctx;
     const data = envelope.data as Record<string, unknown>;
@@ -37,7 +46,7 @@ export async function POST(req: NextRequest) {
     }
 
     await markWebhookProcessed(ctx.storeId, ctx.envelope.event_id);
-    return ok({ status: 'processed' });
+    response = ok({ status: 'processed' });
   } catch (error) {
     await markWebhookFailed({
       storeId: ctx.storeId,
@@ -45,6 +54,7 @@ export async function POST(req: NextRequest) {
       integrationId: ctx.integrationId,
       error,
     });
-    return fail(error);
+    response = fail(error);
   }
+  return withDevCors(req, response);
 }
