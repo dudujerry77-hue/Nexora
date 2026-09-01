@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { webhookProductPayloadSchema } from '@/lib/validation';
+import { webhookProductPayloadSchema, canonicalProductSchema } from '@/lib/validation';
 import { authenticateAndDedupeWebhook, markWebhookProcessed, markWebhookFailed } from '@/lib/webhookAuth';
 import { upsertProduct, deleteProductBySku } from '@/lib/productService';
 import { connectorRegistry } from '@/lib/connectors';
@@ -20,7 +20,12 @@ export async function POST(req: NextRequest) {
     const data = envelope.data as Record<string, unknown>;
 
     if (envelope.event === 'product.created' || envelope.event === 'product.updated') {
-      const canonical = connectorRegistry.custom_api.normalizeProduct(data);
+      // The connector's normalizeProduct() only coerces types (String()/
+      // Number()) — it places no cap on length or array size, so the
+      // canonical output is validated here before it ever reaches storage,
+      // the same caps createProductSchema enforces on the dashboard/API-key
+      // path (image size/format, attribute count, etc).
+      const canonical = canonicalProductSchema.parse(connectorRegistry.custom_api.normalizeProduct(data));
       await upsertProduct(storeId, canonical);
     } else if (envelope.event === 'product.deleted') {
       await deleteProductBySku(storeId, String(data.sku ?? ''));

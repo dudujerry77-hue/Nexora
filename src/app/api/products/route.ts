@@ -7,15 +7,41 @@ import { ok, fail } from '@/lib/apiResponse';
 import { ApiError } from '@/lib/errors';
 import { consume } from '@/lib/rateLimit';
 import { toJson } from '@/lib/json';
-import { serializeProduct } from '@/lib/productService';
+import { serializeProduct, assertNexoraManagedProducts } from '@/lib/productService';
+import { assertRequestSizeWithin } from '@/lib/requestLimits';
 
 // These routes read the session cookie, so they can never be statically
 // generated — declare that explicitly to avoid Next's build-time
 // "Dynamic server usage" warning noise.
 export const dynamic = 'force-dynamic';
 
+// Up to 8 images at ~2MB (base64) each, plus other fields — capped well
+// above any legitimate request but far below "unbounded".
+const MAX_PRODUCT_BODY_BYTES = 20_000_000;
+
 export async function GET(req: NextRequest) {
   try {
+    const authHeader = req.headers.get('authorization');
+    if (authHeader) {
+      // Lets a developer's own storefront pull Nexora-managed product data
+      // back out (the "Nexora-managed -> product data -> developer
+      // integration" direction) — a `read`-scoped key (public or secret)
+      // is enough, the same as the SDK's other read-only endpoints, since
+      // a product catalog (name/price/images/stock) is customer-facing
+      // data, not privileged like orders/customers. Always scoped to the
+      // key's own store — a key can never see another store's catalog.
+      const apiKeyCtx = await requireApiKey(req, 'read');
+      const rl = consume(`products:read:${apiKeyCtx.apiKeyId}`, 120, 60_000);
+      if (!rl.allowed) throw new ApiError('rate_limited', 'API key rate limit exceeded.');
+
+      const products = await prisma.product.findMany({
+        where: { storeId: apiKeyCtx.storeId },
+        include: { inventory: true, variants: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      return ok(products.map(serializeProduct));
+    }
+
     const { member } = await requireSession(req);
     const { searchParams } = new URL(req.url);
     const storeId = searchParams.get('storeId') ?? undefined;
@@ -77,8 +103,13 @@ async function createProduct(storeId: string, body: ReturnType<typeof createProd
 
 export async function POST(req: NextRequest) {
   try {
+    assertRequestSizeWithin(req, MAX_PRODUCT_BODY_BYTES);
     const authHeader = req.headers.get('authorization');
     if (authHeader) {
+      // API-key push is the sync channel for developer-owned stores (and
+      // remains available for nexora_managed stores too) — it must keep
+      // working regardless of productMode, so no assertNexoraManagedProducts
+      // check here. Only the session/dashboard path below is restricted.
       const apiKeyCtx = await requireApiKey(req, 'products:write');
       const rl = consume(`products:write:${apiKeyCtx.apiKeyId}`, 60, 60_000);
       if (!rl.allowed) throw new ApiError('rate_limited', 'API key rate limit exceeded.');
@@ -91,6 +122,9 @@ export async function POST(req: NextRequest) {
     const { member } = await requireSession(req);
     const body = createProductSchema.parse(await req.json());
     await assertStoreAccess({ member, storeId: body.storeId, permission: 'manage_products' });
+    // Enforced here, not just hidden in the UI: a developer-owned store's
+    // products may only change via the push-based sync path above.
+    await assertNexoraManagedProducts(body.storeId);
     const product = await createProduct(body.storeId, body);
     return ok(serializeProduct(product), 201);
   } catch (error) {

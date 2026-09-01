@@ -63,15 +63,29 @@ export function MonitoringPanel() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<IssueDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // Read by the SSE handler below, which mounts once (see that effect's
+  // empty dependency array) — refs keep it seeing the *current* store/
+  // filter/selection on every live event instead of whatever they were
+  // when the EventSource was first opened. Without this, switching stores
+  // or filters (without also happening to pick a new issue) would leave
+  // live updates silently querying the previous store/filter forever, and
+  // reopening a fresh SSE connection on every click would risk missing an
+  // event during the brief reconnect window.
   const storeIdRef = useRef(selectedStoreId);
   storeIdRef.current = selectedStoreId;
+  const statusFilterRef = useRef(statusFilter);
+  statusFilterRef.current = statusFilter;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
 
   function loadIssues() {
-    if (!selectedStoreId) {
+    const storeId = storeIdRef.current;
+    if (!storeId) {
       setIssues([]);
       return;
     }
-    apiFetch<Issue[]>(`/api/monitoring/issues?storeId=${selectedStoreId}&status=${statusFilter}`).then((res) => {
+    apiFetch<Issue[]>(`/api/monitoring/issues?storeId=${storeId}&status=${statusFilterRef.current}`).then((res) => {
       setIssues(res.data ?? []);
     });
   }
@@ -86,6 +100,7 @@ export function MonitoringPanel() {
   // Live updates: a connected website/app can report a new error at any
   // time, so this panel refreshes automatically instead of requiring a
   // manual reload — reusing the same SSE stream the notification bell uses.
+  // Mounts exactly once (empty deps) — see the refs above for why.
   useEffect(() => {
     const source = new EventSource('/api/notifications/stream');
     const onIssueEvent = (event: MessageEvent) => {
@@ -93,7 +108,7 @@ export function MonitoringPanel() {
         const payload = JSON.parse(event.data) as { id: string; storeId: string };
         if (payload.storeId !== storeIdRef.current) return;
         loadIssues();
-        if (selectedId === payload.id) loadDetail(payload.id);
+        if (selectedIdRef.current === payload.id) loadDetail(payload.id);
       } catch {
         // ignore malformed event payloads
       }
@@ -102,7 +117,7 @@ export function MonitoringPanel() {
     source.addEventListener('monitoring.issue_updated', onIssueEvent);
     return () => source.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  }, []);
 
   function loadDetail(id: string) {
     setDetailLoading(true);

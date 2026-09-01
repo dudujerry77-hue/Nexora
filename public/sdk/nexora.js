@@ -99,6 +99,21 @@
     return str.length > max ? str.slice(0, max) : str;
   }
 
+  // Query strings and fragments sometimes carry tokens/API keys (e.g.
+  // "?api_key=..." or "?access_token=..."), and a URL can embed Basic Auth
+  // credentials directly ("https://user:pass@host/..."). A failed-request
+  // message only needs to say *which endpoint* failed, so this keeps just
+  // the origin + path and drops everything else before it's ever sent.
+  function sanitizeUrl(url) {
+    try {
+      var base = global.location ? global.location.href : undefined;
+      var parsed = new URL(String(url), base);
+      return parsed.origin + parsed.pathname;
+    } catch (e) {
+      return String(url).split('?')[0].split('#')[0];
+    }
+  }
+
   function sendMonitoringEvent(type, message, extra) {
     if (!state.ready) return;
     extra = extra || {};
@@ -136,7 +151,7 @@
         return nativeFetch(input, init).then(
           function (response) {
             if (!response.ok && !isNexoraBeaconUrl(url)) {
-              sendMonitoringEvent('network_error', (init && init.method ? init.method : 'GET') + ' ' + url + ' failed', {
+              sendMonitoringEvent('network_error', (init && init.method ? init.method : 'GET') + ' ' + sanitizeUrl(url) + ' failed', {
                 statusCode: response.status,
               });
             }
@@ -144,7 +159,7 @@
           },
           function (err) {
             if (!isNexoraBeaconUrl(url)) {
-              sendMonitoringEvent('network_error', (init && init.method ? init.method : 'GET') + ' ' + url + ' failed: ' + err.message, {
+              sendMonitoringEvent('network_error', (init && init.method ? init.method : 'GET') + ' ' + sanitizeUrl(url) + ' failed: ' + err.message, {
                 stack: err.stack,
               });
             }

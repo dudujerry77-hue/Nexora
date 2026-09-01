@@ -162,4 +162,121 @@ describe('products', () => {
     expect(JSON.parse(product.attributes)).toEqual({ material: 'ceramic' });
     expect(product.variants).toHaveLength(1);
   });
+
+  it('rejects a webhook product push whose normalized attributes exceed the 30-key cap', async () => {
+    const { owner, storeId } = await setup();
+    await createIntegration(owner.jar, { storeId, provider: 'custom_webhook' });
+    const endpoint = await prisma.webhookEndpoint.findFirstOrThrow({ where: { storeId } });
+    const secret = decryptSecret(endpoint.secretCiphertext);
+
+    const attributes: Record<string, string> = {};
+    for (let i = 0; i < 31; i++) attributes[`key${i}`] = 'value';
+
+    const payload = {
+      event: 'product.created',
+      store_id: storeId,
+      event_id: 'evt-product-oversized',
+      data: { sku: 'MUG-2', name: 'Oversized Attrs Mug', price: 1500, attributes },
+    };
+    const rawBody = JSON.stringify(payload);
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    const { POST } = await import('@/app/api/webhooks/products/route');
+    const res = await POST(
+      new Request('http://localhost:3000/api/webhooks/products', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-nexora-signature': signWebhookBody(secret, timestamp, rawBody),
+          'x-nexora-timestamp': String(timestamp),
+        },
+        body: rawBody,
+      }) as unknown as Parameters<typeof POST>[0],
+    );
+    expect(res.status).toBe(422);
+
+    const product = await prisma.product.findFirst({ where: { storeId, sku: 'MUG-2' } });
+    expect(product).toBeNull();
+  });
+
+  it('blocks session-authenticated create/update/delete on a developer_owned store, but leaves the API-key push path open', async () => {
+    const { owner, storeId } = await setup();
+    const { POST } = await import('@/app/api/products/route');
+    const created = await POST(
+      buildRequest('/api/products', { method: 'POST', jar: owner.jar, body: { storeId, sku: 'DEV-1', name: 'Dev Widget', price: 1000 } }),
+    );
+    const createdBody = await created.json();
+    expect(created.status).toBe(201);
+
+    const { PATCH } = await import('@/app/api/stores/[id]/route');
+    await PATCH(buildRequest(`/api/stores/${storeId}`, { method: 'PATCH', jar: owner.jar, body: { productMode: 'developer_owned' } }), {
+      params: { id: storeId },
+    });
+
+    const blockedCreate = await POST(
+      buildRequest('/api/products', { method: 'POST', jar: owner.jar, body: { storeId, sku: 'DEV-2', name: 'Should Fail', price: 1000 } }),
+    );
+    expect(blockedCreate.status).toBe(403);
+
+    const { PATCH: patchProduct } = await import('@/app/api/products/[id]/route');
+    const blockedUpdate = await patchProduct(
+      buildRequest(`/api/products/${createdBody.data.id}`, { method: 'PATCH', jar: owner.jar, body: { name: 'Renamed' } }),
+      { params: { id: createdBody.data.id } },
+    );
+    expect(blockedUpdate.status).toBe(403);
+
+    const { DELETE: deleteProduct } = await import('@/app/api/products/[id]/route');
+    const blockedDelete = await deleteProduct(buildRequest(`/api/products/${createdBody.data.id}`, { method: 'DELETE', jar: owner.jar }), {
+      params: { id: createdBody.data.id },
+    });
+    expect(blockedDelete.status).toBe(403);
+
+    const stillThere = await prisma.product.findUnique({ where: { id: createdBody.data.id } });
+    expect(stillThere).not.toBeNull();
+    expect(stillThere?.name).toBe('Dev Widget');
+
+    const integration = await createIntegration(owner.jar, { storeId, provider: 'custom_api' });
+    const apiKeyPush = await POST(
+      buildRequest('/api/products', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${integration.body.data.apiKey}` },
+        body: { storeId, sku: 'DEV-3', name: 'Synced From Developer System', price: 2000 },
+      }),
+    );
+    expect(apiKeyPush.status).toBe(201);
+  });
+
+  it('scopes API-key GET /api/products to the calling key\'s own store', async () => {
+    const { owner, storeId } = await setup();
+    const otherStore = await createStore(owner.jar, { name: 'Other Store' });
+    const otherStoreId = otherStore.body.data.id as string;
+
+    const { POST } = await import('@/app/api/products/route');
+    await POST(buildRequest('/api/products', { method: 'POST', jar: owner.jar, body: { storeId, sku: 'A-1', name: 'Store A Product', price: 1000 } }));
+    await POST(
+      buildRequest('/api/products', { method: 'POST', jar: owner.jar, body: { storeId: otherStoreId, sku: 'B-1', name: 'Store B Product', price: 1000 } }),
+    );
+
+    const integration = await createIntegration(owner.jar, { storeId, provider: 'custom_api' });
+    const { GET } = await import('@/app/api/products/route');
+    const res = await GET(buildRequest('/api/products', { headers: { authorization: `Bearer ${integration.body.data.apiKey}` } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].sku).toBe('A-1');
+  });
+
+  it('rejects a product create/update request whose declared Content-Length exceeds the size cap', async () => {
+    const { owner, storeId } = await setup();
+    const { POST } = await import('@/app/api/products/route');
+    const res = await POST(
+      buildRequest('/api/products', {
+        method: 'POST',
+        jar: owner.jar,
+        body: { storeId, sku: 'BIG-1', name: 'Big Payload', price: 1000 },
+        headers: { 'content-length': String(30_000_000) },
+      }),
+    );
+    expect(res.status).toBe(413);
+  });
 });

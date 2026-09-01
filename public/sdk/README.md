@@ -35,7 +35,10 @@ the dashboard — it just increments an occurrence counter.
 **Never pass sensitive data** into `captureError`/`captureMessage` extras —
 passwords, tokens, API keys, and card numbers are not something Nexora's
 diagnostics schema accepts, and stack traces should never contain secrets
-in the first place.
+in the first place. The automatic `fetch()` failure capture already strips
+the query string and any embedded credentials from a failed request's URL
+(some APIs put tokens in `?params`) before reporting it — only the origin
+and path are ever sent.
 
 ## What this SDK can and cannot do
 

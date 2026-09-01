@@ -69,7 +69,7 @@ export const productVariantSchema = z.object({
   quantity: z.number().int().nonnegative().default(0),
 });
 
-const productImageSchema = z
+export const productImageSchema = z
   .string()
   .max(2_000_000)
   .refine((v) => /^https?:\/\//.test(v) || /^data:image\//.test(v), {
@@ -91,6 +91,25 @@ export const createProductSchema = z.object({
   variants: z.array(productVariantSchema).max(50).optional(),
   quantity: z.number().int().nonnegative().default(0),
   lowStockThreshold: z.number().int().nonnegative().default(5),
+});
+
+// Validates a Connector's normalizeProduct() output before it's persisted
+// via upsertProduct (src/app/api/webhooks/products/route.ts). Without
+// this, a webhook push bypasses every size/shape cap createProductSchema
+// enforces on the dashboard/API-key path — the connector's own String()/
+// Number() coercions place no limit on length or array size.
+export const canonicalProductSchema = z.object({
+  sku: z.string().min(1).max(64),
+  name: z.string().min(1).max(200),
+  description: z.string().max(4000).optional(),
+  price: z.number().int().nonnegative(),
+  currency: z.string().length(3),
+  images: z.array(productImageSchema).max(8).optional(),
+  quantity: z.number().int().nonnegative().optional(),
+  categories: z.array(z.string().min(1).max(60)).max(20).optional(),
+  status: z.string().max(20).optional(),
+  variants: z.array(productVariantSchema.omit({ id: true })).max(50).optional(),
+  attributes: productAttributesSchema.optional(),
 });
 
 export const updateProductSchema = z.object({

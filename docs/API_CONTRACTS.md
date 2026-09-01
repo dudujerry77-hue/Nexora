@@ -68,7 +68,7 @@ express, rather than assuming every integration exposes the same product
 shape.
 
 ```
-GET    /api/products?storeId=&search=&page=            (session)
+GET    /api/products?storeId=&search=&page=            (session, OR API key: `read` scope — own store only)
 POST   /api/products           { storeId, sku, name, description?, price, currency,
                                   imageUrl?, images?, categories?, status?, attributes?,
                                   variants?, quantity? }
@@ -78,6 +78,20 @@ PATCH  /api/products/:id       { name?, description?, price?, imageUrl?, images?
 DELETE /api/products/:id
 ```
 
+- The `read`-scoped GET (available to a public *or* secret key) lets a
+  developer's own storefront pull Nexora-managed product data back out —
+  the "Nexora-managed → product data → developer integration" direction.
+  A product catalog is customer-facing data, unlike orders/customers, so
+  this is safe even for a public key; it is always scoped to the calling
+  key's own store.
+- The session-authenticated POST/PATCH/DELETE (dashboard) paths are
+  rejected with `forbidden` for a `developer_owned` store — enforced
+  server-side, not just hidden in the UI — since that store's products may
+  only change via the API-key/webhook push path below. The API-key POST
+  keeps working regardless of `productMode` (it *is* that push path).
+- POST/PATCH bodies are capped at 20MB (`assertRequestSizeWithin`,
+  `src/lib/requestLimits.ts`) — generous enough for 8 base64 images, far
+  below unbounded.
 - `images` is a JSON array of URLs (`http(s)://`) or uploaded images
   (`data:image/...` URLs from drag/drop or a device file picker) —
   `images[0]` is the cover image, mirrored onto the legacy `imageUrl`
@@ -85,7 +99,10 @@ DELETE /api/products/:id
 - `attributes` is developer-defined but value-restricted (string/number/
   boolean only, max 30 keys) — see `productAttributesSchema` in
   `src/lib/validation.ts` — so a pushed payload can't smuggle nested
-  structures or secrets into storage.
+  structures or secrets into storage. The same cap applies to a webhook
+  push's normalized output (`canonicalProductSchema`), not just this
+  direct API — a connector's `normalizeProduct()` only coerces types and
+  places no size limit on its own.
 - `variants` fully replaces a product's variant set on each write (create
   or update) — the source system is expected to push its complete current
   state, matching how `upsertProduct` already treats every other field for

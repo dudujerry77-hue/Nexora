@@ -15,6 +15,27 @@ export function serializeProduct<T extends Product>(product: T) {
 }
 
 /**
+ * Enforces the dual product-ownership model at the API layer, not just in
+ * the dashboard UI: a `developer_owned` store's products are only ever
+ * meant to change via the push-based API-key/webhook sync path (see
+ * docs/API_CONTRACTS.md "Products"). Call this from every
+ * session-authenticated (dashboard) product mutation — create, update,
+ * delete — so a direct API call with a valid session cookie can't bypass
+ * the read-only UI. Never call this from the API-key/webhook ingestion
+ * path, which must keep working regardless of productMode.
+ */
+export async function assertNexoraManagedProducts(storeId: string): Promise<void> {
+  const store = await prisma.store.findUnique({ where: { id: storeId }, select: { productMode: true } });
+  if (!store) throw new ApiError('not_found', 'Store not found.');
+  if (store.productMode !== 'nexora_managed') {
+    throw new ApiError(
+      'forbidden',
+      "This store's products are managed by its connected integration — push changes via your API key or webhook instead of the dashboard.",
+    );
+  }
+}
+
+/**
  * Creates or updates a product from a developer-owned integration push
  * (webhook or direct API). This is the "sync" half of the dual product-mode
  * design (see docs/API_CONTRACTS.md "Products") — a full replace of the

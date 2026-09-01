@@ -6,6 +6,7 @@ export type ErrorCode =
   | 'conflict'
   | 'rate_limited'
   | 'invalid_signature'
+  | 'payload_too_large'
   | 'internal_error';
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
@@ -16,6 +17,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   conflict: 409,
   rate_limited: 429,
   invalid_signature: 401,
+  payload_too_large: 413,
   internal_error: 500,
 };
 

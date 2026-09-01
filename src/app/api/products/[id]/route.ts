@@ -6,7 +6,10 @@ import { ok, fail } from '@/lib/apiResponse';
 import { ApiError } from '@/lib/errors';
 import { writeAuditLog } from '@/lib/audit';
 import { toJson } from '@/lib/json';
-import { serializeProduct } from '@/lib/productService';
+import { serializeProduct, assertNexoraManagedProducts } from '@/lib/productService';
+import { assertRequestSizeWithin } from '@/lib/requestLimits';
+
+const MAX_PRODUCT_BODY_BYTES = 20_000_000;
 
 async function loadAccessibleProduct(storeIds: string[], productId: string) {
   const product = await prisma.product.findFirst({ where: { id: productId, storeId: { in: storeIds } } });
@@ -16,9 +19,13 @@ async function loadAccessibleProduct(storeIds: string[], productId: string) {
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    assertRequestSizeWithin(req, MAX_PRODUCT_BODY_BYTES);
     const { user, member } = await requireSession(req);
     const storeIds = await getAccessibleStoreIds(member, 'manage_products');
     const product = await loadAccessibleProduct(storeIds, params.id);
+    // Enforced here, not just hidden in the UI: a developer-owned store's
+    // products may only change via its push-based API-key/webhook sync.
+    await assertNexoraManagedProducts(product.storeId);
 
     const body = updateProductSchema.parse(await req.json());
     const { variants, images, categories, attributes, ...rest } = body;
@@ -69,6 +76,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const { user, member } = await requireSession(req);
     const storeIds = await getAccessibleStoreIds(member, 'manage_products');
     const product = await loadAccessibleProduct(storeIds, params.id);
+    // A developer-owned store's products are only ever removed via its own
+    // sync push (a product.deleted webhook) — not from the dashboard.
+    await assertNexoraManagedProducts(product.storeId);
 
     await prisma.$transaction([
       prisma.orderItem.updateMany({ where: { productId: product.id }, data: { productId: null } }),
