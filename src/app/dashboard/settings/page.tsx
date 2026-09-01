@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Lock, FileText } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useSession } from '@/lib/useSession';
 import { EmptyState, LoadingSkeleton } from '@/components/dashboard/ui';
@@ -69,13 +70,13 @@ export default function SettingsPage() {
       <div className="card p-5">
         <h2 className="mb-4 font-semibold">Audit log</h2>
         {session?.memberRole !== 'OWNER' ? (
-          <EmptyState icon="🔒" title="Owners only" body="Ask an owner on your team to view the audit log." />
+          <EmptyState icon={Lock} title="Owners only" body="Ask an owner on your team to view the audit log." />
         ) : logs === null && !notice ? (
           <LoadingSkeleton rows={3} />
         ) : notice ? (
           <p className="text-sm text-[rgb(var(--text-muted))]">{notice}</p>
         ) : logs && logs.length === 0 ? (
-          <EmptyState icon="🗒️" title="No audit events yet" />
+          <EmptyState icon={FileText} title="No audit events yet" />
         ) : (
           <div className="max-h-96 space-y-2 overflow-y-auto text-sm">
             {logs?.map((log) => (

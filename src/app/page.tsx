@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Store, Zap, Plug, Bell, BarChart3, ShieldCheck, Check, type LucideIcon } from 'lucide-react';
 
 const HOW_IT_WORKS = [
   { title: 'Connect', body: 'Create a store and generate a Nexora API key, webhook secret, or SDK public key.' },
@@ -6,13 +7,13 @@ const HOW_IT_WORKS = [
   { title: 'Manage', body: 'Everything lands in one dashboard, in real time, with notifications the moment it happens.' },
 ];
 
-const FEATURES = [
-  { icon: '🏬', title: 'Multiple stores', body: 'Connect a restaurant, a fashion brand, and an electronics shop switch between "All Stores" or drill into one.' },
-  { icon: '⚡', title: 'Real-time orders', body: 'New orders push straight to your dashboard over a live event stream no refresh needed.' },
-  { icon: '🔌', title: 'Open integrations', body: 'A documented API, signed webhooks, and a JavaScript SDK. Built to add more connectors later, never scraped.' },
-  { icon: '🔔', title: 'Notifications', body: 'New orders, low stock, and connection issues surface in one notification center, with unread indicators.' },
-  { icon: '📊', title: 'Analytics', body: 'Revenue, order volume, and low-stock alerts across every store or one at a time.' },
-  { icon: '🔒', title: 'Security by default', body: 'Hashed API keys, HMAC signed webhooks, RBAC, and strict store level data isolation. See docs/AUTH.md.' },
+const FEATURES: { icon: LucideIcon; title: string; body: string }[] = [
+  { icon: Store, title: 'Multiple stores', body: 'Connect a restaurant, a fashion brand, and an electronics shop switch between "All Stores" or drill into one.' },
+  { icon: Zap, title: 'Real-time orders', body: 'New orders push straight to your dashboard over a live event stream no refresh needed.' },
+  { icon: Plug, title: 'Open integrations', body: 'A documented API, signed webhooks, and a JavaScript SDK. Built to add more connectors later, never scraped.' },
+  { icon: Bell, title: 'Notifications', body: 'New orders, low stock, and connection issues surface in one notification center, with unread indicators.' },
+  { icon: BarChart3, title: 'Analytics', body: 'Revenue, order volume, and low-stock alerts across every store or one at a time.' },
+  { icon: ShieldCheck, title: 'Security by default', body: 'Hashed API keys, HMAC signed webhooks, RBAC, and strict store level data isolation. See docs/AUTH.md.' },
 ];
 
 const PRICING = [
@@ -72,7 +73,7 @@ export default function LandingPage() {
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
             <div key={f.title} className="card p-6">
-              <div className="mb-3 text-2xl">{f.icon}</div>
+              <f.icon className="mb-3 h-7 w-7 text-brand-600 dark:text-brand-400" strokeWidth={1.5} aria-hidden="true" />
               <h3 className="mb-2 font-semibold">{f.title}</h3>
               <p className="text-sm text-[rgb(var(--text-muted))]">{f.body}</p>
             </div>
@@ -100,7 +101,7 @@ export default function LandingPage() {
               <ul className="mt-4 flex-1 space-y-2 text-sm">
                 {tier.features.map((f) => (
                   <li key={f} className="flex items-start gap-2">
-                    <span className="text-brand-600 dark:text-brand-400">✓</span>
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" strokeWidth={2} aria-hidden="true" />
                     <span>{f}</span>
                   </li>
                 ))}

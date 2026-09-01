@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Receipt } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
@@ -88,7 +89,7 @@ export default function OrdersPage() {
       ) : error ? (
         <ErrorState message={error} />
       ) : orders.length === 0 ? (
-        <EmptyState icon="🧾" title="No orders" body="Orders sent via the API, webhooks, or SDK will appear here." />
+        <EmptyState icon={Receipt} title="No orders" body="Orders sent via the API, webhooks, or SDK will appear here." />
       ) : (
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">

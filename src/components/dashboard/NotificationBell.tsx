@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Bell } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useToast } from '@/components/Toast';
 
@@ -88,7 +89,7 @@ export function NotificationBell() {
         aria-label="Notifications"
         className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-[rgb(var(--border))]"
       >
-        🔔
+        <Bell className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
         {unreadCount > 0 && (
           <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
             {unreadCount > 9 ? '9+' : unreadCount}

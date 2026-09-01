@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { BarChart3 } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
@@ -64,7 +65,7 @@ export default function InventoryPage() {
       ) : error ? (
         <ErrorState message={error} />
       ) : rows.length === 0 ? (
-        <EmptyState icon="📊" title="Nothing to show" body="Inventory tracks automatically as products are created and orders come in." />
+        <EmptyState icon={BarChart3} title="Nothing to show" body="Inventory tracks automatically as products are created and orders come in." />
       ) : (
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">

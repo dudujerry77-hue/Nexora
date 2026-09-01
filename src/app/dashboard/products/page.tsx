@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Package } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
@@ -106,7 +107,7 @@ export default function ProductsPage() {
       ) : error ? (
         <ErrorState message={error} />
       ) : products.length === 0 ? (
-        <EmptyState icon="📦" title="No products yet" body="Products created here or pushed via the API/webhooks show up in this list." />
+        <EmptyState icon={Package} title="No products yet" body="Products created here or pushed via the API/webhooks show up in this list." />
       ) : (
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
