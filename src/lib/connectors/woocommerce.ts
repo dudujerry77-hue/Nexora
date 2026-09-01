@@ -17,6 +17,10 @@ export const woocommerceConnector: Connector = {
   provider: 'woocommerce',
   label: 'WooCommerce (planned)',
   available: false,
+  // WooCommerce products carry images[], variable-product variations,
+  // categories[], and arbitrary meta_data — a real implementation would
+  // have plenty to map onto every Nexora product field.
+  productCapabilities: { images: true, variants: true, categories: true, customFields: true },
   normalizeOrder(raw) {
     const data = raw as Record<string, unknown>;
     const billing = (data.billing ?? {}) as Record<string, unknown>;
@@ -40,12 +44,20 @@ export const woocommerceConnector: Connector = {
   },
   normalizeProduct(raw) {
     const data = raw as Record<string, unknown>;
+    const images = Array.isArray(data.images)
+      ? (data.images as Record<string, unknown>[]).map((img) => String(img.src ?? '')).filter(Boolean)
+      : undefined;
+    const categories = Array.isArray(data.categories)
+      ? (data.categories as Record<string, unknown>[]).map((c) => String(c.name ?? ''))
+      : undefined;
     return {
       sku: String(data.sku ?? ''),
       name: String(data.name ?? ''),
+      description: data.description ? String(data.description) : undefined,
       price: Number(data.price ?? 0),
       currency: 'NGN',
-      imageUrl: undefined,
+      images,
+      categories,
     };
   },
 };

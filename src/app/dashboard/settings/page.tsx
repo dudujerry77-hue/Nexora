@@ -8,7 +8,7 @@ import { useSession } from '@/lib/useSession';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
 import { EmptyState, LoadingSkeleton } from '@/components/dashboard/ui';
-import { ReportsPanel } from '@/components/dashboard/ReportsPanel';
+import { MonitoringPanel } from '@/components/dashboard/MonitoringPanel';
 
 interface AuditLog {
   id: string;
@@ -26,6 +26,7 @@ function SelectedStoreSettings() {
   const [name, setName] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [savingProductMode, setSavingProductMode] = useState(false);
 
   const store = stores.find((s) => s.id === selectedStoreId) ?? null;
   const isOwner = session?.memberRole === 'OWNER';
@@ -55,6 +56,19 @@ function SelectedStoreSettings() {
       return;
     }
     push('Store renamed.', 'success');
+    refresh();
+  }
+
+  async function changeProductMode(mode: 'nexora_managed' | 'developer_owned') {
+    if (!store || mode === store.productMode) return;
+    setSavingProductMode(true);
+    const res = await apiFetch(`/api/stores/${store.id}`, { method: 'PATCH', body: JSON.stringify({ productMode: mode }) });
+    setSavingProductMode(false);
+    if (res.error) {
+      push(res.error.message, 'error');
+      return;
+    }
+    push('Product system updated.', 'success');
     refresh();
   }
 
@@ -92,6 +106,37 @@ function SelectedStoreSettings() {
           <dd>{store.productCount}</dd>
         </div>
       </dl>
+
+      <div className="border-t border-[rgb(var(--border))] pt-4">
+        <p className="mb-1 text-sm font-medium">Product system</p>
+        <p className="mb-3 text-xs text-[rgb(var(--text-muted))]">
+          Choose who owns this store&apos;s product catalog.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            disabled={!isOwner || savingProductMode}
+            onClick={() => changeProductMode('nexora_managed')}
+            className={`rounded-lg border p-3 text-left text-sm disabled:opacity-60 ${
+              store.productMode === 'nexora_managed' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20' : 'border-[rgb(var(--border))]'
+            }`}
+          >
+            <span className="block font-medium">Nexora-managed</span>
+            <span className="block text-xs text-[rgb(var(--text-muted))]">Create and edit products in this dashboard.</span>
+          </button>
+          <button
+            type="button"
+            disabled={!isOwner || savingProductMode}
+            onClick={() => changeProductMode('developer_owned')}
+            className={`rounded-lg border p-3 text-left text-sm disabled:opacity-60 ${
+              store.productMode === 'developer_owned' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20' : 'border-[rgb(var(--border))]'
+            }`}
+          >
+            <span className="block font-medium">Developer-owned</span>
+            <span className="block text-xs text-[rgb(var(--text-muted))]">Products sync in via your API key or webhook.</span>
+          </button>
+        </div>
+      </div>
 
       {!isOwner ? (
         <p className="text-sm text-[rgb(var(--text-muted))]">Only owners can rename or delete a store.</p>
@@ -216,9 +261,10 @@ function SettingsPageContent() {
       <div className="card p-5">
         <h2 className="mb-1 font-semibold">Reports</h2>
         <p className="mb-4 text-sm text-[rgb(var(--text-muted))]">
-          Report a bug, a crash, or send general feedback to the Nexora team.
+          Automatic monitoring for the selected store — errors, crashes, and failed requests reported by your
+          connected website/app, grouped and updated live.
         </p>
-        <ReportsPanel />
+        <MonitoringPanel />
       </div>
 
       <div className="card p-5">

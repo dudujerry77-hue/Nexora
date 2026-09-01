@@ -3,7 +3,8 @@ import { prisma } from '@/lib/db';
 
 export async function resetDb() {
   await prisma.$transaction([
-    prisma.report.deleteMany(),
+    prisma.monitoringEvent.deleteMany(),
+    prisma.monitoringIssue.deleteMany(),
     prisma.notification.deleteMany(),
     prisma.integrationLog.deleteMany(),
     prisma.auditLog.deleteMany(),
@@ -11,6 +12,7 @@ export async function resetDb() {
     prisma.orderItem.deleteMany(),
     prisma.order.deleteMany(),
     prisma.inventory.deleteMany(),
+    prisma.productVariant.deleteMany(),
     prisma.product.deleteMany(),
     prisma.customer.deleteMany(),
     prisma.apiKey.deleteMany(),
@@ -63,9 +65,25 @@ export function extractJar(response: { cookies: { get: (name: string) => { value
   };
 }
 
+// POST /api/auth/register rate-limits by client IP (`x-forwarded-for`,
+// falling back to a constant "local" when absent — see
+// src/app/api/auth/register/route.ts). Real distinct signups come from
+// distinct IPs; a test suite calling registerUser many times in one file
+// would otherwise all share that "local" bucket and trip the limiter
+// against each other. A unique synthetic IP per call keeps each test
+// registration independent, matching real-world behavior.
+let registerCallCount = 0;
+
 export async function registerUser(params: { name: string; email: string; password: string; orgName: string }) {
   const { POST } = await import('@/app/api/auth/register/route');
-  const res = await POST(buildRequest('/api/auth/register', { method: 'POST', body: params }));
+  registerCallCount += 1;
+  const res = await POST(
+    buildRequest('/api/auth/register', {
+      method: 'POST',
+      body: params,
+      headers: { 'x-forwarded-for': `10.0.0.${registerCallCount % 250}` },
+    }),
+  );
   const body = await res.clone().json();
   return { res, body, jar: extractJar(res) };
 }

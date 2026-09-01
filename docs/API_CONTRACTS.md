@@ -49,13 +49,47 @@ PATCH  /api/orders/:id         { status?, paymentStatus? }  (session, store acce
 
 ## Products
 
+Every store runs in one of two ownership modes (`Store.productMode`,
+changeable in Settings, OWNER only):
+
+- **`nexora_managed`** (default) — products are created/edited in this
+  dashboard (`POST`/`PATCH` below, or the Products page's UI, including
+  drag/drop, device-upload, or URL images).
+- **`developer_owned`** — the developer's own system is the source of
+  truth; the Products page becomes read-only and products arrive the same
+  way orders do: pushed in via the API key or a webhook. Nexora never
+  polls or reaches into a third-party system to "pull" products — see
+  `docs/INTEGRATIONS.md` "Product ownership modes".
+
+Every connector declares a `productCapabilities` descriptor (`images`,
+`variants`, `categories`, `customFields` — `src/lib/connectors/types.ts`)
+so the UI/API can adapt to what a given developer's system can actually
+express, rather than assuming every integration exposes the same product
+shape.
+
 ```
 GET    /api/products?storeId=&search=&page=            (session)
-POST   /api/products           { storeId, sku, name, price, currency, imageUrl?, quantity? }
+POST   /api/products           { storeId, sku, name, description?, price, currency,
+                                  imageUrl?, images?, categories?, status?, attributes?,
+                                  variants?, quantity? }
                                 (API key: products:write, OR session OWNER/manage_products)
-PATCH  /api/products/:id       { name?, price?, imageUrl? }
+PATCH  /api/products/:id       { name?, description?, price?, imageUrl?, images?,
+                                  categories?, status?, attributes?, variants? }
 DELETE /api/products/:id
 ```
+
+- `images` is a JSON array of URLs (`http(s)://`) or uploaded images
+  (`data:image/...` URLs from drag/drop or a device file picker) —
+  `images[0]` is the cover image, mirrored onto the legacy `imageUrl`
+  field for backward compatibility.
+- `attributes` is developer-defined but value-restricted (string/number/
+  boolean only, max 30 keys) — see `productAttributesSchema` in
+  `src/lib/validation.ts` — so a pushed payload can't smuggle nested
+  structures or secrets into storage.
+- `variants` fully replaces a product's variant set on each write (create
+  or update) — the source system is expected to push its complete current
+  state, matching how `upsertProduct` already treats every other field for
+  webhook-pushed products.
 
 ## Inventory
 
@@ -122,22 +156,36 @@ POST /api/notifications/:id/read             (session)
 GET  /api/notifications/stream               (session, Server-Sent Events)  -> live push
 ```
 
-## Reports (organization-scoped, any active member)
+## Monitoring (automatic observability — not a user-submitted form)
+
+A connected website/app reports raw occurrences automatically (the JS SDK's
+built-in auto-capture, or a backend posting with its own secret key);
+Nexora groups them into deduplicated issues per store and shows them live
+in Settings → Reports.
 
 ```
-GET  /api/reports?type=bug|crash|user       (session) -> reports in caller's org, newest first
-POST /api/reports  { type, category, title, description, stepsToReproduce?,
-                      expectedBehavior?, actualBehavior?, severity?, storeId?,
-                      screenshotUrl?, diagnostics? }          (session)
-GET  /api/reports/:id                        (session, org-scoped)
+POST /api/monitoring/events   { type, message, stack?, route?, statusCode?,
+                                 severity?, diagnostics? }
+                               (API key: public or secret, `read` scope — CORS-enabled, like /api/sdk/event)
+GET  /api/monitoring/issues?storeId=&status=unresolved|resolved|ignored|all   (session, view_monitoring)
+GET  /api/monitoring/issues/:id                                              (session, view_monitoring) -> issue + last 20 raw events
+PATCH /api/monitoring/issues/:id   { status: "unresolved"|"resolved"|"ignored" }   (session, manage_monitoring)
 ```
 
-`category` must be one of the values `src/lib/reportCategories.ts` lists for
-the given `type`. `diagnostics` is validated against a strict allow-list
-(`route`, `viewportWidth`, `viewportHeight`, `userAgent`, `appVersion`,
-`errorMessage`) — zod drops any other key, so API keys, webhook secrets,
-passwords, or session tokens can never be persisted through this endpoint
-even by mistake.
+- `type` is one of `js_error | unhandled_rejection | console_error |
+  network_error | crash`.
+- Occurrences are grouped by a fingerprint of `type + normalized message +
+  route` (`src/lib/monitoring.ts`) — a repeat of the same problem
+  increments `occurrenceCount` and bumps `lastSeenAt` rather than creating
+  a new issue; a new occurrence on a `resolved` issue reopens it.
+- `diagnostics` is validated against a strict allow-list (`viewportWidth`,
+  `viewportHeight`, `userAgent`, `appVersion`) — zod drops any other key,
+  so API keys, webhook secrets, passwords, or session tokens can never be
+  persisted through this endpoint even by mistake.
+- A brand-new issue (or a resolved one reopening) also raises a
+  Notification; every occurrence publishes a `monitoring.issue_created` /
+  `monitoring.issue_updated` event over the existing notification SSE
+  stream, which is what makes the dashboard update live.
 
 ## Audit log (organization-scoped, OWNER only)
 

@@ -1,19 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Package } from 'lucide-react';
+import { Package, Plug, Pencil, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
 import { EmptyState, ErrorState, LoadingSkeleton } from '@/components/dashboard/ui';
+import { ProductFormModal, type EditableProduct } from '@/components/dashboard/ProductFormModal';
 
-interface Product {
-  id: string;
-  sku: string;
-  name: string;
-  price: number;
+interface Product extends EditableProduct {
   currency: string;
-  inventory: { quantity: number; lowStockThreshold: number } | null;
 }
 
 export default function ProductsPage() {
@@ -22,8 +18,10 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ sku: '', name: '', price: '', quantity: '' });
+  const [modalProduct, setModalProduct] = useState<EditableProduct | null | undefined>(undefined);
+
+  const store = stores.find((s) => s.id === selectedStoreId);
+  const developerOwned = store?.productMode === 'developer_owned';
 
   function load() {
     setLoading(true);
@@ -39,30 +37,14 @@ export default function ProductsPage() {
 
   useEffect(load, [selectedStoreId]);
 
-  async function createProduct(e: React.FormEvent) {
-    e.preventDefault();
-    const targetStoreId = selectedStoreId ?? stores[0]?.id;
-    if (!targetStoreId) {
-      push('Create a store first.', 'error');
-      return;
-    }
-    const res = await apiFetch('/api/products', {
-      method: 'POST',
-      body: JSON.stringify({
-        storeId: targetStoreId,
-        sku: form.sku,
-        name: form.name,
-        price: Number(form.price),
-        quantity: Number(form.quantity || 0),
-      }),
-    });
+  async function deleteProduct(product: Product) {
+    if (!confirm(`Delete "${product.name}"? This cannot be undone.`)) return;
+    const res = await apiFetch(`/api/products/${product.id}`, { method: 'DELETE' });
     if (res.error) {
       push(res.error.message, 'error');
       return;
     }
-    push('Product created.', 'success');
-    setForm({ sku: '', name: '', price: '', quantity: '' });
-    setShowForm(false);
+    push('Product deleted.', 'success');
     load();
   }
 
@@ -71,35 +53,31 @@ export default function ProductsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Products</h1>
-          <p className="text-sm text-[rgb(var(--text-muted))]">Products synced from your connected stores.</p>
+          <p className="text-sm text-[rgb(var(--text-muted))]">
+            {developerOwned ? 'Synced from your connected integration.' : 'Products managed in this dashboard.'}
+          </p>
         </div>
-        <button onClick={() => setShowForm((v) => !v)} className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
-          + New product
-        </button>
+        {!developerOwned && selectedStoreId && (
+          <button onClick={() => setModalProduct(null)} className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
+            + New product
+          </button>
+        )}
       </div>
 
-      {showForm && (
-        <form onSubmit={createProduct} className="card flex flex-wrap items-end gap-3 p-4">
+      {developerOwned && (
+        <div className="flex items-start gap-3 rounded-lg border border-[rgb(var(--border))] bg-black/[0.02] p-4 text-sm dark:bg-white/[0.03]">
+          <Plug className="mt-0.5 h-5 w-5 shrink-0 text-[rgb(var(--text-muted))]" strokeWidth={1.75} aria-hidden="true" />
           <div>
-            <label className="mb-1 block text-xs font-medium">SKU</label>
-            <input required value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} className="rounded-lg border border-[rgb(var(--border))] bg-transparent px-3 py-2 text-sm" />
+            <p className="font-medium">This store owns its own product system.</p>
+            <p className="mt-1 text-[rgb(var(--text-muted))]">
+              Products here are pushed in automatically from your connected integration (API key or webhook) — see the{' '}
+              <a href="/dashboard/integrations" className="text-brand-600 underline dark:text-brand-400">
+                Integrations
+              </a>{' '}
+              page for credentials. Switch back to Nexora-managed products anytime from Settings.
+            </p>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium">Name</label>
-            <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-lg border border-[rgb(var(--border))] bg-transparent px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium">Price</label>
-            <input required type="number" min="0" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} className="w-28 rounded-lg border border-[rgb(var(--border))] bg-transparent px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium">Stock</label>
-            <input type="number" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="w-24 rounded-lg border border-[rgb(var(--border))] bg-transparent px-3 py-2 text-sm" />
-          </div>
-          <button type="submit" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
-            Create
-          </button>
-        </form>
+        </div>
       )}
 
       {loading ? (
@@ -107,41 +85,95 @@ export default function ProductsPage() {
       ) : error ? (
         <ErrorState message={error} />
       ) : products.length === 0 ? (
-        <EmptyState icon={Package} title="No products yet" body="Products created here or pushed via the API/webhooks show up in this list." />
+        <EmptyState
+          icon={Package}
+          title="No products yet"
+          body={
+            developerOwned
+              ? 'Push a product from your connected integration to see it here.'
+              : 'Create a product, or push one via the API/webhooks.'
+          }
+        />
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b border-[rgb(var(--border))] text-left text-xs uppercase text-[rgb(var(--text-muted))]">
-              <tr>
-                <th className="px-4 py-3">SKU</th>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Price</th>
-                <th className="px-4 py-3">Stock</th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.map((p) => (
-                <tr key={p.id} className="border-b border-[rgb(var(--border))] last:border-0">
-                  <td className="px-4 py-3 font-mono text-xs">{p.sku}</td>
-                  <td className="px-4 py-3">{p.name}</td>
-                  <td className="px-4 py-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {products.map((p) => {
+            const cover = p.images?.[0];
+            const lowStock = p.inventory && p.inventory.quantity <= p.inventory.lowStockThreshold;
+            return (
+              <div key={p.id} className="card overflow-hidden">
+                <div className="flex h-36 items-center justify-center bg-black/5 dark:bg-white/5">
+                  {cover ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={cover} alt={p.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <Package className="h-10 w-10 text-[rgb(var(--text-muted))]" strokeWidth={1.5} aria-hidden="true" />
+                  )}
+                </div>
+                <div className="space-y-2 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="min-w-0 truncate font-semibold">{p.name}</h3>
+                    <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-semibold uppercase dark:bg-white/10">{p.status}</span>
+                  </div>
+                  <p className="font-mono text-xs text-[rgb(var(--text-muted))]">{p.sku}</p>
+                  <p className="text-sm font-medium">
                     {p.currency} {p.price.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    {p.inventory ? (
-                      <span className={p.inventory.quantity <= p.inventory.lowStockThreshold ? 'font-semibold text-amber-500' : ''}>
-                        {p.inventory.quantity}
-                        {p.inventory.quantity <= p.inventory.lowStockThreshold ? ' · low stock' : ''}
+                  </p>
+                  {p.categories.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {p.categories.slice(0, 3).map((c) => (
+                        <span key={c} className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs text-[rgb(var(--text-muted))]">
+                    {p.variants.length > 0 ? (
+                      `${p.variants.length} variant${p.variants.length === 1 ? '' : 's'}`
+                    ) : p.inventory ? (
+                      <span className={lowStock ? 'font-semibold text-amber-500' : ''}>
+                        {p.inventory.quantity} in stock{lowStock ? ' · low stock' : ''}
                       </span>
                     ) : (
-                      '—'
+                      'No stock tracked'
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </p>
+
+                  {!developerOwned && (
+                    <div className="flex gap-2 border-t border-[rgb(var(--border))] pt-2">
+                      <button
+                        onClick={() => setModalProduct(p)}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[rgb(var(--border))] py-1.5 text-xs font-medium"
+                      >
+                        <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteProduct(p)}
+                        aria-label={`Delete ${p.name}`}
+                        className="flex items-center justify-center rounded-lg border border-red-400/50 px-2 text-red-500"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
+      )}
+
+      {modalProduct !== undefined && selectedStoreId && (
+        <ProductFormModal
+          storeId={selectedStoreId}
+          product={modalProduct}
+          onClose={() => setModalProduct(undefined)}
+          onSaved={() => {
+            setModalProduct(undefined);
+            load();
+          }}
+        />
       )}
     </div>
   );

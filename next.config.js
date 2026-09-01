@@ -18,8 +18,13 @@ const securityHeaders = [
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
   {
+    // img-src allows https: (in addition to self/data/blob) because
+    // products support an image-by-URL field — a developer's product
+    // photo is typically hosted on their own site or a CDN, an
+    // arbitrary-but-safe origin an <img> tag can't use to execute script,
+    // unlike script-src/connect-src which stay locked to 'self'.
     key: 'Content-Security-Policy',
-    value: `default-src 'self'; script-src ${scriptSrc}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none';`,
+    value: `default-src 'self'; script-src ${scriptSrc}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; frame-ancestors 'none';`,
   },
 ];
 

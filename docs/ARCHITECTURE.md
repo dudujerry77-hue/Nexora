@@ -43,11 +43,11 @@ special-cases a platform directly; it resolves a connector by
 
 ```
 ConnectorRegistry
-  ├── custom_api      (Nexora API / generic backend integration)  ✅ implemented
-  ├── custom_webhook  (Nexora Webhooks, signed HMAC payload)      ✅ implemented
-  ├── js_sdk          (Nexora JavaScript SDK, browser-safe events) ✅ implemented
-  ├── woocommerce     (maps WooCommerce webhook payloads)          🚧 stub, not wired to a live store
-  ├── shopify         (maps Shopify webhook payloads)              🚧 stub, not wired to a live store
+  ├── custom_api      (Nexora API / generic backend integration)   implemented
+  ├── custom_webhook  (Nexora Webhooks, signed HMAC payload)       implemented
+  ├── js_sdk          (Nexora JavaScript SDK, browser-safe events) implemented
+  ├── woocommerce     (maps WooCommerce webhook payloads)          stub, not wired to a live store
+  ├── shopify         (maps Shopify webhook payloads)              stub, not wired to a live store
   └── <future>        add a new file in src/lib/connectors/ and register it
 ```
 

@@ -10,6 +10,9 @@ function makeNativeConnector(provider: string, label: string): Connector {
     provider,
     label,
     available: true,
+    // Nexora's own payload shape supports every field the Products model
+    // has, since it IS the canonical shape everything else maps onto.
+    productCapabilities: { images: true, variants: true, categories: true, customFields: true },
     normalizeOrder(raw) {
       const data = raw as Record<string, unknown>;
       const customer = (data.customer ?? {}) as Record<string, unknown>;
@@ -35,13 +38,39 @@ function makeNativeConnector(provider: string, label: string): Connector {
     },
     normalizeProduct(raw) {
       const data = raw as Record<string, unknown>;
+      const images = Array.isArray(data.images)
+        ? data.images.map(String)
+        : data.image_url
+          ? [String(data.image_url)]
+          : undefined;
+      const variants = Array.isArray(data.variants)
+        ? data.variants.map((v) => {
+            const variant = v as Record<string, unknown>;
+            return {
+              name: String(variant.name ?? ''),
+              sku: variant.sku ? String(variant.sku) : undefined,
+              price: variant.price !== undefined ? Number(variant.price) : undefined,
+              quantity: variant.quantity !== undefined ? Number(variant.quantity) : undefined,
+            };
+          })
+        : undefined;
+      const attributes =
+        data.attributes && typeof data.attributes === 'object'
+          ? (data.attributes as Record<string, string | number | boolean>)
+          : undefined;
+
       return {
         sku: String(data.sku ?? ''),
         name: String(data.name ?? ''),
+        description: data.description ? String(data.description) : undefined,
         price: Number(data.price ?? 0),
         currency: String(data.currency ?? 'NGN'),
-        imageUrl: data.image_url ? String(data.image_url) : undefined,
+        images,
         quantity: data.quantity !== undefined ? Number(data.quantity) : undefined,
+        categories: Array.isArray(data.categories) ? data.categories.map(String) : undefined,
+        status: data.status ? String(data.status) : undefined,
+        variants,
+        attributes,
       };
     },
   };

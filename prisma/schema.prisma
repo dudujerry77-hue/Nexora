@@ -28,7 +28,6 @@ model User {
   ownedOrganizations Organization[] @relation("OrgOwner")
   memberships        Member[]
   auditLogs          AuditLog[]
-  reports            Report[]
 
   @@index([role])
 }
@@ -40,11 +39,11 @@ model Organization {
   owner     User     @relation("OrgOwner", fields: [ownerId], references: [id])
   createdAt DateTime @default(now())
 
-  members       Member[]
-  stores        Store[]
-  notifications Notification[]
-  auditLogs     AuditLog[]
-  reports       Report[]
+  members          Member[]
+  stores           Store[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  monitoringIssues MonitoringIssue[]
 
   @@index([ownerId])
 }
@@ -83,6 +82,10 @@ model StoreAssignment {
 
 // type: "restaurant" | "fashion" | "retail" | "electronics" | "other"
 // status: "connected" | "warning" | "disconnected"
+// productMode: "nexora_managed" (create/edit products in this dashboard) |
+//              "developer_owned" (the developer's own system is the source
+//              of truth; products arrive via the existing API/webhook push
+//              paths — see docs/INTEGRATIONS.md "Product ownership modes")
 model Store {
   id             String    @id @default(cuid())
   organizationId String
@@ -90,6 +93,7 @@ model Store {
   logoUrl        String?
   type           String    @default("other")
   status         String    @default("disconnected")
+  productMode    String    @default("nexora_managed")
   lastSyncAt     DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -106,7 +110,8 @@ model Store {
   notifications    Notification[]
   integrationLogs  IntegrationLog[]
   storeAssignments StoreAssignment[]
-  reports          Report[]
+  monitoringIssues MonitoringIssue[]
+  monitoringEvents MonitoringEvent[]
 
   @@index([organizationId])
 }
@@ -226,23 +231,51 @@ model OrderItem {
   @@index([orderId])
 }
 
+// status: "active" | "draft" | "archived"
+// images: JSON array of URLs (http(s):// or a data: URL from a
+// drag/drop or device upload — see docs/API_CONTRACTS.md "Products").
+// imageUrl mirrors images[0] for backward compatibility with older
+// integrations/tests that only ever set a single cover image.
+// categories: JSON array of strings.
+// attributes: JSON object of developer-defined extra fields (primitive
+// values only — see src/lib/validation.ts productAttributesSchema).
 model Product {
-  id        String   @id @default(cuid())
-  storeId   String
-  sku       String
-  name      String
-  price     Int
-  currency  String   @default("NGN")
-  imageUrl  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  storeId     String
+  sku         String
+  name        String
+  description String?
+  price       Int
+  currency    String   @default("NGN")
+  imageUrl    String?
+  images      String   @default("[]")
+  categories  String   @default("[]")
+  status      String   @default("active")
+  attributes  String   @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  store      Store       @relation(fields: [storeId], references: [id])
+  store      Store            @relation(fields: [storeId], references: [id])
   inventory  Inventory?
   orderItems OrderItem[]
+  variants   ProductVariant[]
 
   @@unique([storeId, sku])
   @@index([storeId])
+}
+
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String
+  name      String
+  sku       String?
+  price     Int?
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
 }
 
 model Inventory {
@@ -311,40 +344,68 @@ model AuditLog {
   @@index([actorUserId])
 }
 
-// type: "bug" | "crash" | "user"
-// category: see src/lib/reportCategories.ts for the allowed set per type
-// severity: "low" | "medium" | "high" | "critical" (bug/crash only)
-// status: "open" | "in_review" | "resolved" | "closed"
-// diagnostics: JSON — non-sensitive client context only (route, viewport,
-// user agent, timestamp, app version, error message). Never API keys,
-// webhook secrets, passwords, or session tokens — see
-// src/app/api/reports/route.ts.
-model Report {
-  id               String   @id @default(cuid())
-  organizationId   String
-  storeId          String?
-  authorUserId     String
-  type             String
-  category         String
-  title            String
-  description      String
-  stepsToReproduce String?
-  expectedBehavior String?
-  actualBehavior   String?
-  severity         String?
-  status           String   @default("open")
-  screenshotUrl    String?
-  diagnostics      String   @default("{}")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+// Automatic observability, not a user-submitted form — see
+// docs/API_CONTRACTS.md "Monitoring". A connected website/app (via the JS
+// SDK's automatic capture, or a backend using its API key) reports raw
+// occurrences; Nexora groups them into a deduplicated MonitoringIssue by
+// fingerprint (see src/lib/monitoring.ts).
+//
+// type: "js_error" | "unhandled_rejection" | "console_error" |
+//       "network_error" | "crash"
+// severity: "info" | "warning" | "error" | "critical"
+// status: "unresolved" | "resolved" | "ignored" — a new occurrence on a
+// resolved issue automatically reopens it (regression).
+model MonitoringIssue {
+  id              String   @id @default(cuid())
+  organizationId  String
+  storeId         String
+  fingerprint     String
+  type            String
+  message         String
+  stack           String?
+  route           String?
+  severity        String   @default("error")
+  status          String   @default("unresolved")
+  occurrenceCount Int      @default(1)
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  lastBrowser     String?
+  lastStatusCode  Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  store        Store?       @relation(fields: [storeId], references: [id])
-  author       User         @relation(fields: [authorUserId], references: [id])
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  store        Store             @relation(fields: [storeId], references: [id])
+  events       MonitoringEvent[]
 
+  @@unique([storeId, fingerprint])
   @@index([organizationId])
+  @@index([storeId, status])
+}
+
+// One row per raw occurrence reported for a MonitoringIssue — diagnostics
+// is a strict allow-list (route, viewport, browser/user agent, app
+// version) validated by src/lib/validation.ts monitoringEventSchema, which
+// silently drops any other key so API keys/webhook secrets/passwords/
+// session tokens can never be persisted through it.
+model MonitoringEvent {
+  id          String   @id @default(cuid())
+  issueId     String
+  storeId     String
+  type        String
+  message     String
+  stack       String?
+  route       String?
+  statusCode  Int?
+  browser     String?
+  diagnostics String   @default("{}")
+  occurredAt  DateTime @default(now())
+
+  issue MonitoringIssue @relation(fields: [issueId], references: [id])
+  store Store           @relation(fields: [storeId], references: [id])
+
+  @@index([issueId])
   @@index([storeId])
-  @@index([organizationId, type])
 }
 
 // direction: "inbound" | "outbound"; level: "info" | "warning" | "error"

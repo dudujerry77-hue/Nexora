@@ -5,7 +5,13 @@ import { EventEmitter } from 'events';
 // (swap for Redis pub/sub behind this same interface).
 
 export interface NexoraEvent {
-  type: 'notification.created' | 'order.created' | 'order.updated' | 'integration.status_changed';
+  type:
+    | 'notification.created'
+    | 'order.created'
+    | 'order.updated'
+    | 'integration.status_changed'
+    | 'monitoring.issue_created'
+    | 'monitoring.issue_updated';
   organizationId: string;
   payload: unknown;
 }
