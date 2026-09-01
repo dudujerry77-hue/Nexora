@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Lock, FileText, Store as StoreIcon } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useSession } from '@/lib/useSession';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
 import { EmptyState, LoadingSkeleton } from '@/components/dashboard/ui';
+import { ReportsPanel } from '@/components/dashboard/ReportsPanel';
 
 interface AuditLog {
   id: string;
@@ -134,7 +136,16 @@ function SelectedStoreSettings() {
 }
 
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={<LoadingSkeleton rows={4} />}>
+      <SettingsPageContent />
+    </Suspense>
+  );
+}
+
+function SettingsPageContent() {
   const { session } = useSession();
+  const searchParams = useSearchParams();
   const [logs, setLogs] = useState<AuditLog[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -145,6 +156,15 @@ export default function SettingsPage() {
       else setNotice(res.error?.message ?? null);
     });
   }, [session]);
+
+  // Deep-link support for ProfileMenu's "Reports" item
+  // (/dashboard/settings?tab=reports) — Reports lives inline on this page
+  // rather than as a separate route, so linking to it just scrolls here.
+  useEffect(() => {
+    if (searchParams.get('tab') === 'reports') {
+      document.getElementById('reports')?.scrollIntoView({ block: 'start' });
+    }
+  }, [searchParams]);
 
   return (
     <div className="space-y-8">
@@ -191,6 +211,14 @@ export default function SettingsPage() {
           <code className="rounded bg-black/5 px-1 dark:bg-white/10"> StoreAssignment</code>) already supports it, but
           there is no invite flow in this MVP yet.
         </p>
+      </div>
+
+      <div className="card p-5">
+        <h2 className="mb-1 font-semibold">Reports</h2>
+        <p className="mb-4 text-sm text-[rgb(var(--text-muted))]">
+          Report a bug, a crash, or send general feedback to the Nexora team.
+        </p>
+        <ReportsPanel />
       </div>
 
       <div className="card p-5">

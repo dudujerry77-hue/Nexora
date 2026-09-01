@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Settings, LogOut } from 'lucide-react';
+import { Settings, LogOut, FileWarning } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 
@@ -109,6 +109,15 @@ export function ProfileMenu({ name, email, role, organizationName }: ProfileMenu
           >
             <Settings className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
             Account settings
+          </Link>
+          <Link
+            href="/dashboard/settings?tab=reports"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/5"
+          >
+            <FileWarning className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            Reports
           </Link>
           <button
             onClick={logout}

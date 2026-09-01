@@ -16,7 +16,10 @@ export interface StoreSummary {
 
 export interface StoreScopeValue {
   stores: StoreSummary[];
-  selectedStoreId: string | null; // null = "All Stores"
+  // A real connected store id, or null only when the account has zero
+  // connected stores. There is no "All Stores" value — every dashboard
+  // page operates on exactly one selected store.
+  selectedStoreId: string | null;
   setSelectedStoreId: (id: string | null) => void;
   refresh: () => void;
   loading: boolean;

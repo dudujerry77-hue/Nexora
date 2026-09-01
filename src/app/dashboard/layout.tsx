@@ -15,6 +15,10 @@ import { apiFetch } from '@/lib/apiClient';
 const SELECTED_STORE_KEY = 'nexora-selected-store';
 const SIDEBAR_COLLAPSED_KEY = 'nexora-sidebar-collapsed';
 
+// There is no "All Stores" mode: `selectedStoreId` is either a real,
+// currently-connected store id, or null (only possible when the account
+// has zero connected stores, or before the store list has loaded once).
+// The stored value is either a real id or absent — never a sentinel.
 function readStoredStoreId(): string | null {
   try {
     return localStorage.getItem(SELECTED_STORE_KEY);
@@ -30,8 +34,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Lazy-initialized from localStorage so the selected store survives a
   // full page refresh, not just client-side navigation. Validated against
   // the loaded store list below once it arrives (e.g. a store since
-  // deleted, or belonging to a different account, falls back to "All
-  // Stores" rather than silently scoping to a nonexistent id).
+  // deleted, or belonging to a different account, falls back to another
+  // real connected store — never to a no-op "All Stores" state).
   const [selectedStoreId, setSelectedStoreIdState] = useState<string | null>(readStoredStoreId);
   const [storesLoading, setStoresLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -45,6 +49,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, []);
 
+  // `id` must be a real store id — there is no "all stores" value to pass
+  // here. Passing null clears the selection entirely (only meaningful when
+  // the account has zero connected stores).
   const setSelectedStoreId = useCallback((id: string | null) => {
     setSelectedStoreIdState(id);
     try {
@@ -71,13 +78,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!sessionLoading) refresh();
   }, [sessionLoading, session, router, refresh]);
 
-  // Once the real store list loads, drop a persisted selection that no
-  // longer refers to a store this account can see (deleted, or restored
-  // from a different account's browser profile).
+  // Once the real store list loads, `selectedStoreId` must always resolve
+  // to a real connected store when one exists — there is no valid "no
+  // selection while stores exist" state to leave it in:
+  //   - A persisted id that no longer refers to a store this account can
+  //     see (deleted, revoked access, or restored from a different
+  //     account's browser profile) is replaced with a real store.
+  //   - No selection at all (first-ever login, nothing in localStorage) is
+  //     resolved the same way, to the first connected store.
+  // Only when the account has zero connected stores does this leave
+  // `selectedStoreId` as null, which is the sole legitimate "no store"
+  // state (rendered as a neutral placeholder, never as "All Stores").
   useEffect(() => {
     if (storesLoading) return;
-    if (selectedStoreId && !stores.some((s) => s.id === selectedStoreId)) {
-      setSelectedStoreId(null);
+    const stillValid = selectedStoreId && stores.some((s) => s.id === selectedStoreId);
+    if (!stillValid) {
+      setSelectedStoreId(stores[0]?.id ?? null);
     }
   }, [storesLoading, stores, selectedStoreId, setSelectedStoreId]);
 

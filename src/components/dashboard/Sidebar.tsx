@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Store,
@@ -50,6 +50,7 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, onToggleCollapsed, mobileOpen, onCloseMobile }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { stores, selectedStoreId, setSelectedStoreId, loading: storesLoading } = useStoreScope();
   const [hovering, setHovering] = useState(false);
 
@@ -60,9 +61,14 @@ export function Sidebar({ collapsed, onToggleCollapsed, mobileOpen, onCloseMobil
   const expanded = mobileOpen || !collapsed || hovering;
   const isOverlaying = collapsed && hovering && !mobileOpen;
 
+  // Clicking a connected store both sets the global selection (so every
+  // other page picks it up instantly via context) and takes the user to
+  // that store's own dashboard route — a highlight-only change here would
+  // leave the user looking at the previous store's page.
   function selectStore(id: string) {
     setSelectedStoreId(id);
     onCloseMobile();
+    router.push(`/dashboard/stores/${id}`);
   }
 
   const navContent = (

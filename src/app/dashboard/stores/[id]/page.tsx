@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/apiClient';
 import { useToast } from '@/components/Toast';
+import { useStoreScope } from '@/lib/useStores';
 import { ConnectionBadge, ErrorState, LoadingSkeleton } from '@/components/dashboard/ui';
 
 interface Integration {
@@ -36,6 +37,7 @@ export default function StoreDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { push } = useToast();
+  const { selectedStoreId, setSelectedStoreId } = useStoreScope();
   const [store, setStore] = useState<StoreDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,6 +54,14 @@ export default function StoreDetailPage() {
   }
 
   useEffect(load, [id]);
+
+  // Landing on a specific store's dashboard by any route — the sidebar,
+  // the Stores list, a bookmark, browser back/forward — must keep the
+  // global selection in sync with the URL, so the switcher and every
+  // other page immediately agree with what's on screen here.
+  useEffect(() => {
+    if (id && id !== selectedStoreId) setSelectedStoreId(id);
+  }, [id, selectedStoreId, setSelectedStoreId]);
 
   async function createIntegration(e: React.FormEvent) {
     e.preventDefault();

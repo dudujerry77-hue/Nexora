@@ -14,3 +14,7 @@ prisma/test.db-journal
 coverage/
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# Local-only config for the external-site integration test harness — holds
+# a real API key pasted in during manual testing, never committed.
+dev-tools/external-site-simulator/config.local.js

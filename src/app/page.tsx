@@ -8,7 +8,7 @@ const HOW_IT_WORKS = [
 ];
 
 const FEATURES: { icon: LucideIcon; title: string; body: string }[] = [
-  { icon: Store, title: 'Multiple stores', body: 'Connect a restaurant, a fashion brand, and an electronics shop switch between "All Stores" or drill into one.' },
+  { icon: Store, title: 'Multiple stores', body: 'Connect a restaurant, a fashion brand, and an electronics shop switch between them in one click.' },
   { icon: Zap, title: 'Real-time orders', body: 'New orders push straight to your dashboard over a live event stream no refresh needed.' },
   { icon: Plug, title: 'Open integrations', body: 'A documented API, signed webhooks, and a JavaScript SDK. Built to add more connectors later, never scraped.' },
   { icon: Bell, title: 'Notifications', body: 'New orders, low stock, and connection issues surface in one notification center, with unread indicators.' },
