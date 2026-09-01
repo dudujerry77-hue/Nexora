@@ -8,6 +8,10 @@ export interface StoreSummary {
   logoUrl: string | null;
   type: string;
   status: string;
+  // "nexora_managed": create/edit products in this dashboard.
+  // "developer_owned": the developer's own system owns product data; it
+  // arrives via the existing API/webhook push paths.
+  productMode: 'nexora_managed' | 'developer_owned';
   lastSyncAt: string | null;
   orderCount: number;
   productCount: number;

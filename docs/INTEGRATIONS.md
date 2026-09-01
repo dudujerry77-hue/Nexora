@@ -100,9 +100,66 @@ pretending an SDK artifact exists.
 Each `Integration` tracks `lastRequestAt`, `lastWebhookAt`, `lastSyncAt`,
 and a rolling `failedRequestCount`. Status is derived, not manually set:
 
-- 🟢 **Connected** — a successful request/webhook within the last 24h.
-- 🟡 **Warning** — nothing successful in 24h, or failures present, but not
+- **Connected** — a successful request/webhook within the last 24h.
+- **Warning** — nothing successful in 24h, or failures present, but not
   yet 72h silent.
-- 🔴 **Disconnected** — silent for 72h+, or manually disconnected.
+- **Disconnected** — silent for 72h+, or manually disconnected.
 
 See `src/lib/integrations.ts:computeStatus`.
+
+## Product ownership modes
+
+Every `Store` has a `productMode`:
+
+- **`nexora_managed`** (default) — products are created and edited
+  directly in the Nexora dashboard (Products page). This is the right
+  choice for a developer who doesn't already have a product catalog and
+  wants Nexora to be it.
+- **`developer_owned`** — the developer's own system already owns the
+  product catalog. Nexora doesn't force them to recreate it: products flow
+  in through the *same* inbound paths orders already use — `POST
+  /api/products` (path 1) or `POST /api/webhooks/products` (path 2). The
+  Products page becomes read-only for that store, showing exactly what was
+  pushed in.
+
+Nexora deliberately never reaches out to "pull" from a developer's system
+(no stored third-party OAuth tokens, no polling) — consistent with the
+inbound-only architecture above. "Pull" in practice means: the developer's
+existing backend, which already owns this data, pushes it to Nexora
+whenever it changes, the same way it already pushes orders.
+
+### Capability-based product adapters
+
+Different platforms expose very different product shapes — Shopify's
+products are built around variants, WooCommerce has REST-shaped
+categories/meta_data, hand-rolled backends may have none of that. Rather
+than assuming one shape, every `Connector` declares what it can actually
+carry:
+
+```ts
+// src/lib/connectors/types.ts
+interface ProductCapabilities {
+  images: boolean;
+  variants: boolean;
+  categories: boolean;
+  customFields: boolean;
+}
+```
+
+`normalizeProduct()` maps whatever the connector's native payload looks
+like onto Nexora's canonical `CanonicalProduct` (name, description, price,
+`images[]`, `categories[]`, `status`, `variants[]`, and a value-restricted
+`attributes` bag for anything developer-specific) — see
+`src/lib/connectors/nexoraNative.ts`, `shopify.ts`, and `woocommerce.ts`
+for three different real-world shapes mapping onto the same target.
+
+## Automatic monitoring
+
+The JS SDK auto-captures uncaught errors, unhandled promise rejections,
+failed `fetch()` calls, and `console.error()` calls the moment
+`Nexora.init()` runs (`autoCapture: false` to disable, or call
+`Nexora.captureError`/`captureCrash`/`captureMessage` manually) and posts
+them to `POST /api/monitoring/events`. A backend can post to the same
+endpoint with its secret key for server-side exceptions and failed
+upstream calls. See `docs/API_CONTRACTS.md` "Monitoring" for the
+grouping/dedup rules and `public/sdk/README.md` for SDK usage.

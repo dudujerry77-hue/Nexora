@@ -90,4 +90,5 @@ Every inbound webhook (accepted, duplicate, invalid signature, or
 validation failure) is written to `integration_logs` with a `direction`,
 `level`, and `message`, visible on the store's **Integration Logs** page for
 debugging, and it updates the parent `Integration`'s `lastWebhookAt` /
-`failedRequestCount` counters that drive the 🟢/🟡/🔴 connection status.
+`failedRequestCount` counters that drive the connected/warning/disconnected
+status.

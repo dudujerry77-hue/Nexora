@@ -66,7 +66,9 @@ export type StorePermission =
   | 'manage_orders'
   | 'view_products'
   | 'manage_products'
-  | 'view_customers';
+  | 'view_customers'
+  | 'view_monitoring'
+  | 'manage_monitoring';
 
 interface StorePermissions {
   viewOrders?: boolean;
@@ -74,6 +76,8 @@ interface StorePermissions {
   viewProducts?: boolean;
   manageProducts?: boolean;
   viewCustomers?: boolean;
+  viewMonitoring?: boolean;
+  manageMonitoring?: boolean;
 }
 
 const PERMISSION_KEY_MAP: Record<StorePermission, keyof StorePermissions> = {
@@ -82,6 +86,8 @@ const PERMISSION_KEY_MAP: Record<StorePermission, keyof StorePermissions> = {
   view_products: 'viewProducts',
   manage_products: 'manageProducts',
   view_customers: 'viewCustomers',
+  view_monitoring: 'viewMonitoring',
+  manage_monitoring: 'manageMonitoring',
 };
 
 /**
@@ -153,7 +159,11 @@ export interface ApiKeyContext {
 
 export async function requireApiKey(req: NextRequest, requiredScope?: ApiKeyScope): Promise<ApiKeyContext> {
   const header = req.headers.get('authorization') ?? '';
-  const match = /^Bearer\s+(nx_(?:live|test)_[A-Za-z0-9_-]+)$/.exec(header);
+  // Includes `public` — the js_sdk integration's only credential
+  // (generatePublicKey() in src/lib/apiKey.ts) is `nx_public_...`, and it
+  // must reach this same scope check (it only ever carries `read`) so the
+  // SDK's beacon endpoints (/api/sdk/event, /api/monitoring/events) work.
+  const match = /^Bearer\s+(nx_(?:live|test|public)_[A-Za-z0-9_-]+)$/.exec(header);
   if (!match) throw new ApiError('unauthorized', 'Missing or malformed API key.');
 
   const keyHash = hashApiKey(match[1]);

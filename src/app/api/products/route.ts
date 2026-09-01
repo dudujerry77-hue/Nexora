@@ -6,6 +6,8 @@ import { createProductSchema } from '@/lib/validation';
 import { ok, fail } from '@/lib/apiResponse';
 import { ApiError } from '@/lib/errors';
 import { consume } from '@/lib/rateLimit';
+import { toJson } from '@/lib/json';
+import { serializeProduct } from '@/lib/productService';
 
 // These routes read the session cookie, so they can never be statically
 // generated — declare that explicitly to avoid Next's build-time
@@ -29,11 +31,11 @@ export async function GET(req: NextRequest) {
 
     const products = await prisma.product.findMany({
       where,
-      include: { inventory: true },
+      include: { inventory: true, variants: true },
       orderBy: { createdAt: 'desc' },
     });
 
-    return ok(products);
+    return ok(products.map(serializeProduct));
   } catch (error) {
     return fail(error);
   }
@@ -41,20 +43,30 @@ export async function GET(req: NextRequest) {
 
 async function createProduct(storeId: string, body: ReturnType<typeof createProductSchema.parse>) {
   try {
-    return await prisma.product.create({
+    const images = body.images ?? (body.imageUrl ? [body.imageUrl] : []);
+    const product = await prisma.product.create({
       data: {
         storeId,
         sku: body.sku,
         name: body.name,
+        description: body.description,
         price: body.price,
         currency: body.currency,
-        imageUrl: body.imageUrl,
+        imageUrl: images[0] ?? body.imageUrl,
+        images: toJson(images),
+        categories: toJson(body.categories ?? []),
+        status: body.status,
+        attributes: toJson(body.attributes ?? {}),
         inventory: {
           create: { storeId, quantity: body.quantity, lowStockThreshold: body.lowStockThreshold },
         },
+        ...(body.variants && body.variants.length > 0
+          ? { variants: { create: body.variants.map((v) => ({ name: v.name, sku: v.sku, price: v.price, quantity: v.quantity })) } }
+          : {}),
       },
-      include: { inventory: true },
+      include: { inventory: true, variants: true },
     });
+    return product;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       throw new ApiError('conflict', `Product with SKU ${body.sku} already exists for this store.`);
@@ -73,14 +85,14 @@ export async function POST(req: NextRequest) {
       const body = createProductSchema.parse(await req.json());
       if (body.storeId !== apiKeyCtx.storeId) throw new ApiError('forbidden', 'API key not authorized for this store.');
       const product = await createProduct(apiKeyCtx.storeId, body);
-      return ok(product, 201);
+      return ok(serializeProduct(product), 201);
     }
 
     const { member } = await requireSession(req);
     const body = createProductSchema.parse(await req.json());
     await assertStoreAccess({ member, storeId: body.storeId, permission: 'manage_products' });
     const product = await createProduct(body.storeId, body);
-    return ok(product, 201);
+    return ok(serializeProduct(product), 201);
   } catch (error) {
     return fail(error);
   }

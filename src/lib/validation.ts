@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { REPORT_TYPES, categoryValuesForType } from './reportCategories';
 
 export const registerSchema = z.object({
   name: z.string().min(1).max(120),
@@ -23,6 +22,7 @@ export const updateStoreSchema = z.object({
   name: z.string().min(1).max(160).optional(),
   logoUrl: z.string().url().max(500).optional().nullable(),
   status: z.enum(['connected', 'warning', 'disconnected']).optional(),
+  productMode: z.enum(['nexora_managed', 'developer_owned']).optional(),
 });
 
 export const orderItemSchema = z.object({
@@ -53,21 +53,56 @@ export const updateOrderSchema = z.object({
   paymentStatus: z.enum(['unpaid', 'paid', 'refunded']).optional(),
 });
 
+// Products (see docs/API_CONTRACTS.md "Products" for the dual product-mode
+// design). `attributes` is developer-defined but value-restricted (no
+// nested objects/arrays) so a pushed payload can't smuggle arbitrary
+// structures — or secrets — into storage under an unbounded key set.
+export const productAttributesSchema = z
+  .record(z.union([z.string().max(500), z.number(), z.boolean()]))
+  .refine((obj) => Object.keys(obj).length <= 30, { message: 'A product may carry at most 30 custom attributes.' });
+
+export const productVariantSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1).max(120),
+  sku: z.string().max(64).optional(),
+  price: z.number().int().nonnegative().optional(),
+  quantity: z.number().int().nonnegative().default(0),
+});
+
+const productImageSchema = z
+  .string()
+  .max(2_000_000)
+  .refine((v) => /^https?:\/\//.test(v) || /^data:image\//.test(v), {
+    message: 'Each image must be an http(s) URL or an uploaded image (data URL).',
+  });
+
 export const createProductSchema = z.object({
   storeId: z.string().min(1),
   sku: z.string().min(1).max(64),
   name: z.string().min(1).max(200),
+  description: z.string().max(4000).optional(),
   price: z.number().int().nonnegative(),
   currency: z.string().length(3).default('NGN'),
   imageUrl: z.string().url().max(500).optional(),
+  images: z.array(productImageSchema).max(8).optional(),
+  categories: z.array(z.string().min(1).max(60)).max(20).optional(),
+  status: z.enum(['active', 'draft', 'archived']).default('active'),
+  attributes: productAttributesSchema.optional(),
+  variants: z.array(productVariantSchema).max(50).optional(),
   quantity: z.number().int().nonnegative().default(0),
   lowStockThreshold: z.number().int().nonnegative().default(5),
 });
 
 export const updateProductSchema = z.object({
   name: z.string().min(1).max(200).optional(),
+  description: z.string().max(4000).optional().nullable(),
   price: z.number().int().nonnegative().optional(),
   imageUrl: z.string().url().max(500).optional().nullable(),
+  images: z.array(productImageSchema).max(8).optional(),
+  categories: z.array(z.string().min(1).max(60)).max(20).optional(),
+  status: z.enum(['active', 'draft', 'archived']).optional(),
+  attributes: productAttributesSchema.optional(),
+  variants: z.array(productVariantSchema).max(50).optional(),
 });
 
 export const updateInventorySchema = z.object({
@@ -110,38 +145,34 @@ export const webhookInventoryPayloadSchema = z.object({
   }),
 });
 
-// Diagnostics is a strict allow-list of known-safe fields — zod drops any
-// unrecognized key by default (no `.passthrough()`), so even a client bug
-// that tried to stuff an API key, webhook secret, or session token into
-// this object could never have it reach the database.
-export const reportDiagnosticsSchema = z.object({
-  route: z.string().max(300).optional(),
+// Automatic monitoring event ingestion (src/app/api/monitoring/events).
+// `diagnostics` is a strict allow-list of known-safe fields — zod drops
+// any unrecognized key by default (no `.passthrough()`), so even a client
+// bug that tried to stuff an API key, webhook secret, session token, or
+// password into this object could never have it reach the database.
+export const MONITORING_EVENT_TYPES = ['js_error', 'unhandled_rejection', 'console_error', 'network_error', 'crash'] as const;
+export const MONITORING_SEVERITIES = ['info', 'warning', 'error', 'critical'] as const;
+
+export const monitoringDiagnosticsSchema = z.object({
   viewportWidth: z.number().int().positive().max(20000).optional(),
   viewportHeight: z.number().int().positive().max(20000).optional(),
   userAgent: z.string().max(500).optional(),
   appVersion: z.string().max(60).optional(),
-  errorMessage: z.string().max(4000).optional(),
 });
 
-export const createReportSchema = z
-  .object({
-    type: z.enum(REPORT_TYPES),
-    category: z.string().min(1).max(60),
-    title: z.string().min(1).max(200),
-    description: z.string().min(1).max(5000),
-    stepsToReproduce: z.string().max(5000).optional(),
-    expectedBehavior: z.string().max(2000).optional(),
-    actualBehavior: z.string().max(2000).optional(),
-    severity: z.enum(['low', 'medium', 'high', 'critical']).optional(),
-    storeId: z.string().min(1).max(120).optional(),
-    screenshotUrl: z.string().url().max(2000).optional(),
-    diagnostics: reportDiagnosticsSchema.optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (!categoryValuesForType(data.type).includes(data.category)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['category'], message: `Invalid category for a "${data.type}" report.` });
-    }
-  });
+export const monitoringEventSchema = z.object({
+  type: z.enum(MONITORING_EVENT_TYPES),
+  message: z.string().min(1).max(2000),
+  stack: z.string().max(8000).optional(),
+  route: z.string().max(300).optional(),
+  statusCode: z.number().int().min(100).max(599).optional(),
+  severity: z.enum(MONITORING_SEVERITIES).optional(),
+  diagnostics: monitoringDiagnosticsSchema.optional(),
+});
+
+export const updateMonitoringIssueSchema = z.object({
+  status: z.enum(['unresolved', 'resolved', 'ignored']),
+});
 
 export const webhookCustomerPayloadSchema = z.object({
   event: z.enum(['customer.created', 'customer.updated']),

@@ -10,6 +10,10 @@ export const shopifyConnector: Connector = {
   provider: 'shopify',
   label: 'Shopify (planned)',
   available: false,
+  // Shopify's product model is built around variants (every product has
+  // at least one), images[], product_type/tags for categorization, and
+  // metafields for custom data.
+  productCapabilities: { images: true, variants: true, categories: true, customFields: true },
   normalizeOrder(raw) {
     const data = raw as Record<string, unknown>;
     const customer = (data.customer ?? {}) as Record<string, unknown>;
@@ -33,14 +37,31 @@ export const shopifyConnector: Connector = {
   },
   normalizeProduct(raw) {
     const data = raw as Record<string, unknown>;
-    const variants = Array.isArray(data.variants) ? data.variants : [{}];
-    const firstVariant = (variants[0] ?? {}) as Record<string, unknown>;
+    const rawVariants = Array.isArray(data.variants) ? data.variants : [{}];
+    const firstVariant = (rawVariants[0] ?? {}) as Record<string, unknown>;
+    const images = Array.isArray(data.images)
+      ? (data.images as Record<string, unknown>[]).map((img) => String(img.src ?? '')).filter(Boolean)
+      : undefined;
+    const variants = rawVariants.length > 1
+      ? rawVariants.map((v) => {
+          const variant = v as Record<string, unknown>;
+          return {
+            name: String(variant.title ?? ''),
+            sku: variant.sku ? String(variant.sku) : undefined,
+            price: variant.price !== undefined ? Number(variant.price) : undefined,
+            quantity: variant.inventory_quantity !== undefined ? Number(variant.inventory_quantity) : undefined,
+          };
+        })
+      : undefined;
     return {
       sku: String(firstVariant.sku ?? ''),
       name: String(data.title ?? ''),
+      description: data.body_html ? String(data.body_html) : undefined,
       price: Number(firstVariant.price ?? 0),
       currency: 'USD',
-      imageUrl: undefined,
+      images,
+      categories: data.product_type ? [String(data.product_type)] : undefined,
+      variants,
     };
   },
 };
