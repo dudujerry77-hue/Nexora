@@ -1,5 +1,7 @@
 'use client';
 
+import { AlertTriangle, Circle, Inbox, type LucideIcon } from 'lucide-react';
+
 export function StatCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
     <div className="card p-5">
@@ -10,10 +12,20 @@ export function StatCard({ label, value, hint }: { label: string; value: string 
   );
 }
 
-export function EmptyState({ icon = '📭', title, body, action }: { icon?: string; title: string; body?: string; action?: React.ReactNode }) {
+export function EmptyState({
+  icon: Icon = Inbox,
+  title,
+  body,
+  action,
+}: {
+  icon?: LucideIcon;
+  title: string;
+  body?: string;
+  action?: React.ReactNode;
+}) {
   return (
     <div className="card flex flex-col items-center justify-center gap-2 p-12 text-center">
-      <span className="text-3xl">{icon}</span>
+      <Icon className="h-8 w-8 text-[rgb(var(--text-muted))]" strokeWidth={1.5} aria-hidden="true" />
       <p className="font-medium">{title}</p>
       {body && <p className="max-w-sm text-sm text-[rgb(var(--text-muted))]">{body}</p>}
       {action}
@@ -24,7 +36,7 @@ export function EmptyState({ icon = '📭', title, body, action }: { icon?: stri
 export function ErrorState({ message }: { message: string }) {
   return (
     <div className="card flex flex-col items-center gap-2 p-12 text-center">
-      <span className="text-3xl">⚠️</span>
+      <AlertTriangle className="h-8 w-8 text-red-500" strokeWidth={1.5} aria-hidden="true" />
       <p className="font-medium text-red-500">{message}</p>
     </div>
   );
@@ -40,17 +52,17 @@ export function LoadingSkeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
-const CONNECTION_LABEL: Record<string, { icon: string; label: string; className: string }> = {
-  connected: { icon: '🟢', label: 'Connected', className: 'text-emerald-600 dark:text-emerald-400' },
-  warning: { icon: '🟡', label: 'Warning', className: 'text-amber-600 dark:text-amber-400' },
-  disconnected: { icon: '🔴', label: 'Disconnected', className: 'text-red-500' },
+const CONNECTION_LABEL: Record<string, { label: string; className: string }> = {
+  connected: { label: 'Connected', className: 'text-emerald-600 dark:text-emerald-400' },
+  warning: { label: 'Warning', className: 'text-amber-600 dark:text-amber-400' },
+  disconnected: { label: 'Disconnected', className: 'text-red-500' },
 };
 
 export function ConnectionBadge({ status }: { status: string }) {
   const meta = CONNECTION_LABEL[status] ?? CONNECTION_LABEL.disconnected;
   return (
     <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${meta.className}`}>
-      <span>{meta.icon}</span>
+      <Circle className="h-2 w-2" fill="currentColor" stroke="none" aria-hidden="true" />
       {meta.label}
     </span>
   );

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Receipt, Bell } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { StatCard, ErrorState, LoadingSkeleton, EmptyState, OrderStatusBadge } from '@/components/dashboard/ui';
@@ -59,7 +60,7 @@ export default function OverviewPage() {
         <div className="card p-5">
           <h2 className="mb-4 font-semibold">Recent orders</h2>
           {overview.recentOrders.length === 0 ? (
-            <EmptyState icon="🧾" title="No orders yet" body="Orders from your connected stores will show up here." />
+            <EmptyState icon={Receipt} title="No orders yet" body="Orders from your connected stores will show up here." />
           ) : (
             <div className="space-y-3">
               {overview.recentOrders.map((o) => (
@@ -87,7 +88,7 @@ export default function OverviewPage() {
         <div className="card p-5">
           <h2 className="mb-4 font-semibold">Recent notifications</h2>
           {overview.recentNotifications.length === 0 ? (
-            <EmptyState icon="🔔" title="No notifications yet" />
+            <EmptyState icon={Bell} title="No notifications yet" />
           ) : (
             <div className="space-y-3">
               {overview.recentNotifications.map((n) => (

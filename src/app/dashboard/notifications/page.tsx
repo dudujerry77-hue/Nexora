@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Bell, AlertTriangle, AlertOctagon, type LucideIcon } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { EmptyState, ErrorState, LoadingSkeleton } from '@/components/dashboard/ui';
 
@@ -13,7 +14,11 @@ interface Notification {
   createdAt: string;
 }
 
-const SEVERITY_ICON: Record<Notification['severity'], string> = { info: '🔔', warning: '⚠️', critical: '🚨' };
+const SEVERITY_ICON: Record<Notification['severity'], { icon: LucideIcon; className: string }> = {
+  info: { icon: Bell, className: 'text-brand-600 dark:text-brand-400' },
+  warning: { icon: AlertTriangle, className: 'text-amber-600 dark:text-amber-400' },
+  critical: { icon: AlertOctagon, className: 'text-red-500' },
+};
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -45,10 +50,12 @@ export default function NotificationsPage() {
       ) : error ? (
         <ErrorState message={error} />
       ) : notifications.length === 0 ? (
-        <EmptyState icon="🔔" title="No notifications yet" />
+        <EmptyState icon={Bell} title="No notifications yet" />
       ) : (
         <div className="card divide-y divide-[rgb(var(--border))]">
-          {notifications.map((n) => (
+          {notifications.map((n) => {
+            const severity = SEVERITY_ICON[n.severity];
+            return (
             <button
               key={n.id}
               onClick={() => markRead(n.id)}
@@ -56,7 +63,7 @@ export default function NotificationsPage() {
                 !n.readAt ? 'bg-brand-50 dark:bg-brand-900/10' : ''
               }`}
             >
-              <span className="text-lg">{SEVERITY_ICON[n.severity]}</span>
+              <severity.icon className={`h-5 w-5 shrink-0 ${severity.className}`} strokeWidth={1.75} aria-hidden="true" />
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   {!n.readAt && <span className="h-1.5 w-1.5 rounded-full bg-brand-600" />}
@@ -66,7 +73,8 @@ export default function NotificationsPage() {
                 <p className="mt-1 text-xs text-[rgb(var(--text-muted))]">{new Date(n.createdAt).toLocaleString()}</p>
               </div>
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

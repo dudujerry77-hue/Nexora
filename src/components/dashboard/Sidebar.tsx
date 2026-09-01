@@ -2,18 +2,31 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import {
+  LayoutDashboard,
+  Store,
+  Receipt,
+  Package,
+  Users,
+  BarChart3,
+  Bell,
+  TrendingUp,
+  Plug,
+  Settings,
+  type LucideIcon,
+} from 'lucide-react';
 
-const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Overview', icon: '🏠' },
-  { href: '/dashboard/stores', label: 'Stores', icon: '🏬' },
-  { href: '/dashboard/orders', label: 'Orders', icon: '🧾' },
-  { href: '/dashboard/products', label: 'Products', icon: '📦' },
-  { href: '/dashboard/customers', label: 'Customers', icon: '👥' },
-  { href: '/dashboard/inventory', label: 'Inventory', icon: '📊' },
-  { href: '/dashboard/notifications', label: 'Notifications', icon: '🔔' },
-  { href: '/dashboard/analytics', label: 'Analytics', icon: '📈' },
-  { href: '/dashboard/integrations', label: 'Integrations', icon: '🔌' },
-  { href: '/dashboard/settings', label: 'Settings', icon: '⚙️' },
+const NAV_ITEMS: { href: string; label: string; icon: LucideIcon }[] = [
+  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+  { href: '/dashboard/stores', label: 'Stores', icon: Store },
+  { href: '/dashboard/orders', label: 'Orders', icon: Receipt },
+  { href: '/dashboard/products', label: 'Products', icon: Package },
+  { href: '/dashboard/customers', label: 'Customers', icon: Users },
+  { href: '/dashboard/inventory', label: 'Inventory', icon: BarChart3 },
+  { href: '/dashboard/notifications', label: 'Notifications', icon: Bell },
+  { href: '/dashboard/analytics', label: 'Analytics', icon: TrendingUp },
+  { href: '/dashboard/integrations', label: 'Integrations', icon: Plug },
+  { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 
 export function Sidebar() {
@@ -37,7 +50,7 @@ export function Sidebar() {
                   : 'text-[rgb(var(--text-muted))] hover:bg-black/5 dark:hover:bg-white/5'
               }`}
             >
-              <span>{item.icon}</span>
+              <item.icon className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
               {item.label}
             </Link>
           );

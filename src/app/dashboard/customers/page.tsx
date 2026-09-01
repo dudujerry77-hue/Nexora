@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Users } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { EmptyState, ErrorState, LoadingSkeleton } from '@/components/dashboard/ui';
@@ -44,7 +45,7 @@ export default function CustomersPage() {
       ) : error ? (
         <ErrorState message={error} />
       ) : customers.length === 0 ? (
-        <EmptyState icon="👥" title="No customers yet" body="Customers attached to incoming orders will appear here." />
+        <EmptyState icon={Users} title="No customers yet" body="Customers attached to incoming orders will appear here." />
       ) : (
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">

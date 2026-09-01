@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { Store } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
@@ -87,7 +88,7 @@ export default function StoresPage() {
         <LoadingSkeleton />
       ) : stores.length === 0 ? (
         <EmptyState
-          icon="🏬"
+          icon={Store}
           title="No stores connected yet"
           body='Create a store like "Iya Kudinka Restaurant" to get an API key, webhook URL, and SDK snippet.'
         />

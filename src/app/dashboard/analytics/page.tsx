@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { StatCard, ErrorState, LoadingSkeleton, EmptyState } from '@/components/dashboard/ui';
@@ -73,11 +74,14 @@ export default function AnalyticsPage() {
           <div className="card p-5">
             <h2 className="mb-4 font-semibold">Low-stock products</h2>
             {overview.lowStockProducts.length === 0 ? (
-              <EmptyState icon="✅" title="Nothing running low" />
+              <EmptyState icon={CheckCircle2} title="Nothing running low" />
             ) : (
               <ul className="space-y-2 text-sm">
                 {overview.lowStockProducts.map((p) => (
-                  <li key={p.id}>⚠️ {p.name}</li>
+                  <li key={p.id} className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" strokeWidth={1.75} aria-hidden="true" />
+                    {p.name}
+                  </li>
                 ))}
               </ul>
             )}
