@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { REPORT_TYPES, categoryValuesForType } from './reportCategories';
 
 export const registerSchema = z.object({
   name: z.string().min(1).max(120),
@@ -108,6 +109,39 @@ export const webhookInventoryPayloadSchema = z.object({
     low_stock_threshold: z.number().int().nonnegative().optional(),
   }),
 });
+
+// Diagnostics is a strict allow-list of known-safe fields — zod drops any
+// unrecognized key by default (no `.passthrough()`), so even a client bug
+// that tried to stuff an API key, webhook secret, or session token into
+// this object could never have it reach the database.
+export const reportDiagnosticsSchema = z.object({
+  route: z.string().max(300).optional(),
+  viewportWidth: z.number().int().positive().max(20000).optional(),
+  viewportHeight: z.number().int().positive().max(20000).optional(),
+  userAgent: z.string().max(500).optional(),
+  appVersion: z.string().max(60).optional(),
+  errorMessage: z.string().max(4000).optional(),
+});
+
+export const createReportSchema = z
+  .object({
+    type: z.enum(REPORT_TYPES),
+    category: z.string().min(1).max(60),
+    title: z.string().min(1).max(200),
+    description: z.string().min(1).max(5000),
+    stepsToReproduce: z.string().max(5000).optional(),
+    expectedBehavior: z.string().max(2000).optional(),
+    actualBehavior: z.string().max(2000).optional(),
+    severity: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+    storeId: z.string().min(1).max(120).optional(),
+    screenshotUrl: z.string().url().max(2000).optional(),
+    diagnostics: reportDiagnosticsSchema.optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!categoryValuesForType(data.type).includes(data.category)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['category'], message: `Invalid category for a "${data.type}" report.` });
+    }
+  });
 
 export const webhookCustomerPayloadSchema = z.object({
   event: z.enum(['customer.created', 'customer.updated']),

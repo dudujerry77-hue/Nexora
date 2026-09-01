@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 
 export async function resetDb() {
   await prisma.$transaction([
+    prisma.report.deleteMany(),
     prisma.notification.deleteMany(),
     prisma.integrationLog.deleteMany(),
     prisma.auditLog.deleteMany(),

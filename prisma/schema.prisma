@@ -28,6 +28,7 @@ model User {
   ownedOrganizations Organization[] @relation("OrgOwner")
   memberships        Member[]
   auditLogs          AuditLog[]
+  reports            Report[]
 
   @@index([role])
 }
@@ -43,6 +44,7 @@ model Organization {
   stores        Store[]
   notifications Notification[]
   auditLogs     AuditLog[]
+  reports       Report[]
 
   @@index([ownerId])
 }
@@ -65,12 +67,12 @@ model Member {
 }
 
 model StoreAssignment {
-  id        String   @id @default(cuid())
-  memberId  String
-  storeId   String
+  id          String   @id @default(cuid())
+  memberId    String
+  storeId     String
   // JSON: { viewOrders, manageOrders, viewProducts, manageProducts, viewCustomers }
   permissions String
-  createdAt DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   member Member @relation(fields: [memberId], references: [id])
   store  Store  @relation(fields: [storeId], references: [id])
@@ -92,18 +94,19 @@ model Store {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization      Organization      @relation(fields: [organizationId], references: [id])
-  integrations      Integration[]
-  apiKeys           ApiKey[]
-  webhookEndpoints  WebhookEndpoint[]
-  webhookEvents     WebhookEvent[]
-  orders            Order[]
-  products          Product[]
-  inventory         Inventory[]
-  customers         Customer[]
-  notifications     Notification[]
-  integrationLogs   IntegrationLog[]
-  storeAssignments  StoreAssignment[]
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  integrations     Integration[]
+  apiKeys          ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+  webhookEvents    WebhookEvent[]
+  orders           Order[]
+  products         Product[]
+  inventory        Inventory[]
+  customers        Customer[]
+  notifications    Notification[]
+  integrationLogs  IntegrationLog[]
+  storeAssignments StoreAssignment[]
+  reports          Report[]
 
   @@index([organizationId])
 }
@@ -111,17 +114,17 @@ model Store {
 // provider: "custom_api" | "custom_webhook" | "js_sdk" | "woocommerce" | "shopify"
 // status: "connected" | "warning" | "disconnected"
 model Integration {
-  id                String    @id @default(cuid())
-  storeId           String
-  provider          String
-  status            String    @default("disconnected")
-  lastRequestAt     DateTime?
-  lastWebhookAt     DateTime?
-  lastSyncAt        DateTime?
-  failedRequestCount Int      @default(0)
-  config            String    @default("{}")
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  storeId            String
+  provider           String
+  status             String    @default("disconnected")
+  lastRequestAt      DateTime?
+  lastWebhookAt      DateTime?
+  lastSyncAt         DateTime?
+  failedRequestCount Int       @default(0)
+  config             String    @default("{}")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   store           Store            @relation(fields: [storeId], references: [id])
   apiKeys         ApiKey[]
@@ -151,14 +154,14 @@ model ApiKey {
 }
 
 model WebhookEndpoint {
-  id                String   @id @default(cuid())
-  storeId           String
+  id               String   @id @default(cuid())
+  storeId          String
   // AES-256-GCM ciphertext (see src/lib/crypto.ts), NOT a one-way hash —
   // verifying an inbound HMAC signature requires recovering the plaintext
   // secret, unlike API keys/passwords which only need hash comparison.
-  secretCiphertext  String
-  description       String   @default("Nexora inbound webhook secret")
-  createdAt         DateTime @default(now())
+  secretCiphertext String
+  description      String   @default("Nexora inbound webhook secret")
+  createdAt        DateTime @default(now())
 
   store Store @relation(fields: [storeId], references: [id])
 
@@ -187,21 +190,21 @@ model WebhookEvent {
 // status: "pending" | "confirmed" | "preparing" | "shipped" | "delivered" | "cancelled"
 // paymentStatus: "unpaid" | "paid" | "refunded"
 model Order {
-  id               String    @id @default(cuid())
-  storeId          String
-  externalId       String
-  customerId       String?
-  customerName     String
-  status           String    @default("pending")
-  paymentStatus    String    @default("unpaid")
-  total            Int
-  currency         String    @default("NGN")
-  deliveryAddress  String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id              String   @id @default(cuid())
+  storeId         String
+  externalId      String
+  customerId      String?
+  customerName    String
+  status          String   @default("pending")
+  paymentStatus   String   @default("unpaid")
+  total           Int
+  currency        String   @default("NGN")
+  deliveryAddress String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  store    Store      @relation(fields: [storeId], references: [id])
-  customer Customer?  @relation(fields: [customerId], references: [id])
+  store    Store       @relation(fields: [storeId], references: [id])
+  customer Customer?   @relation(fields: [customerId], references: [id])
   items    OrderItem[]
 
   @@unique([storeId, externalId])
@@ -210,7 +213,7 @@ model Order {
 }
 
 model OrderItem {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
   orderId   String
   productId String?
   name      String
@@ -306,6 +309,42 @@ model AuditLog {
 
   @@index([organizationId])
   @@index([actorUserId])
+}
+
+// type: "bug" | "crash" | "user"
+// category: see src/lib/reportCategories.ts for the allowed set per type
+// severity: "low" | "medium" | "high" | "critical" (bug/crash only)
+// status: "open" | "in_review" | "resolved" | "closed"
+// diagnostics: JSON — non-sensitive client context only (route, viewport,
+// user agent, timestamp, app version, error message). Never API keys,
+// webhook secrets, passwords, or session tokens — see
+// src/app/api/reports/route.ts.
+model Report {
+  id               String   @id @default(cuid())
+  organizationId   String
+  storeId          String?
+  authorUserId     String
+  type             String
+  category         String
+  title            String
+  description      String
+  stepsToReproduce String?
+  expectedBehavior String?
+  actualBehavior   String?
+  severity         String?
+  status           String   @default("open")
+  screenshotUrl    String?
+  diagnostics      String   @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  store        Store?       @relation(fields: [storeId], references: [id])
+  author       User         @relation(fields: [authorUserId], references: [id])
+
+  @@index([organizationId])
+  @@index([storeId])
+  @@index([organizationId, type])
 }
 
 // direction: "inbound" | "outbound"; level: "info" | "warning" | "error"

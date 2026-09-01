@@ -122,6 +122,23 @@ POST /api/notifications/:id/read             (session)
 GET  /api/notifications/stream               (session, Server-Sent Events)  -> live push
 ```
 
+## Reports (organization-scoped, any active member)
+
+```
+GET  /api/reports?type=bug|crash|user       (session) -> reports in caller's org, newest first
+POST /api/reports  { type, category, title, description, stepsToReproduce?,
+                      expectedBehavior?, actualBehavior?, severity?, storeId?,
+                      screenshotUrl?, diagnostics? }          (session)
+GET  /api/reports/:id                        (session, org-scoped)
+```
+
+`category` must be one of the values `src/lib/reportCategories.ts` lists for
+the given `type`. `diagnostics` is validated against a strict allow-list
+(`route`, `viewportWidth`, `viewportHeight`, `userAgent`, `appVersion`,
+`errorMessage`) — zod drops any other key, so API keys, webhook secrets,
+passwords, or session tokens can never be persisted through this endpoint
+even by mistake.
+
 ## Audit log (organization-scoped, OWNER only)
 
 ```
