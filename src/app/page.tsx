@@ -7,17 +7,17 @@ const HOW_IT_WORKS = [
 ];
 
 const FEATURES = [
-  { icon: '🏬', title: 'Multiple stores', body: 'Connect a restaurant, a fashion brand, and an electronics shop — switch between "All Stores" or drill into one.' },
-  { icon: '⚡', title: 'Real-time orders', body: 'New orders push straight to your dashboard over a live event stream — no refresh needed.' },
+  { icon: '🏬', title: 'Multiple stores', body: 'Connect a restaurant, a fashion brand, and an electronics shop switch between "All Stores" or drill into one.' },
+  { icon: '⚡', title: 'Real-time orders', body: 'New orders push straight to your dashboard over a live event stream no refresh needed.' },
   { icon: '🔌', title: 'Open integrations', body: 'A documented API, signed webhooks, and a JavaScript SDK. Built to add more connectors later, never scraped.' },
   { icon: '🔔', title: 'Notifications', body: 'New orders, low stock, and connection issues surface in one notification center, with unread indicators.' },
   { icon: '📊', title: 'Analytics', body: 'Revenue, order volume, and low-stock alerts across every store or one at a time.' },
-  { icon: '🔒', title: 'Security by default', body: 'Hashed API keys, HMAC-signed webhooks, RBAC, and strict store-level data isolation. See docs/AUTH.md.' },
+  { icon: '🔒', title: 'Security by default', body: 'Hashed API keys, HMAC signed webhooks, RBAC, and strict store level data isolation. See docs/AUTH.md.' },
 ];
 
 const PRICING = [
   { name: 'Starter', price: '$0', tagline: 'For one store getting started', features: ['1 store', 'Nexora API + Webhooks', 'JS SDK', 'Email notifications'] },
-  { name: 'Growth', price: '$49/mo', tagline: 'For teams running multiple stores', features: ['Up to 10 stores', 'Staff roles & permissions', 'Real-time dashboard', 'Priority support'] },
+  { name: 'Growth', price: '$49/mo', tagline: 'For teams running multiple stores', features: ['Up to 10 stores', 'Staff roles & permissions', 'Real time dashboard', 'Priority support'] },
   { name: 'Scale', price: 'Talk to us', tagline: 'For platforms and franchises', features: ['Unlimited stores', 'Custom connectors', 'Audit log export', 'Dedicated support'] },
 ];
 
@@ -83,8 +83,8 @@ export default function LandingPage() {
       <section className="mx-auto max-w-4xl px-6 py-16 text-center">
         <h2 className="mb-3 text-2xl font-bold">Security</h2>
         <p className="mx-auto max-w-2xl text-[rgb(var(--text-muted))]">
-          Password hashing, hashed & revocable API keys, HMAC-signed webhooks with replay protection, role-based
-          access control, and per-store data isolation are built in from day one — not bolted on later. Read the
+          Password hashing, hashed & revocable API keys, HMAC signed webhooks with replay protection, role based
+          access control, and per store data isolation are built in from day one  not bolted on later. Read the
           full breakdown in <code className="rounded bg-black/5 px-1 dark:bg-white/10">docs/AUTH.md</code>.
         </p>
       </section>
@@ -111,7 +111,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="mx-auto max-w-6xl px-6 py-10 text-center text-sm text-[rgb(var(--text-muted))]">
-        NEXORA — One dashboard. Every store.
+        NEXORA One dashboard. Every store.
       </footer>
     </main>
   );
