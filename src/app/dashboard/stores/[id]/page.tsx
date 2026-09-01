@@ -95,12 +95,12 @@ export default function StoreDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">{store.name}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-bold">{store.name}</h1>
           <p className="text-sm capitalize text-[rgb(var(--text-muted))]">{store.type}</p>
         </div>
-        <button onClick={deleteStore} className="rounded-lg border border-red-400/50 px-3 py-2 text-sm text-red-500">
+        <button onClick={deleteStore} className="shrink-0 rounded-lg border border-red-400/50 px-3 py-2 text-sm text-red-500">
           Delete store
         </button>
       </div>

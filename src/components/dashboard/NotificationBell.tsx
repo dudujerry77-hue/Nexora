@@ -39,6 +39,7 @@ export function NotificationBell() {
   const [soundOn, setSoundOn] = useState(true);
   const { push } = useToast();
   const loadedOnce = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     try {
@@ -46,6 +47,23 @@ export function NotificationBell() {
     } catch {
       // ignore
     }
+  }, []);
+
+  useEffect(() => {
+    function handleClick(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, []);
 
   useEffect(() => {
@@ -83,10 +101,12 @@ export function NotificationBell() {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Notifications"
+        aria-expanded={open}
+        aria-haspopup="menu"
         className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-[rgb(var(--border))]"
       >
         <Bell className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
@@ -97,7 +117,7 @@ export function NotificationBell() {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 z-20 mt-2 w-80 card p-2 shadow-xl">
+        <div className="absolute right-0 z-30 mt-2 w-80 max-w-[calc(100vw-2rem)] card p-2 shadow-xl">
           <div className="flex items-center justify-between px-2 py-1">
             <span className="text-sm font-semibold">Notifications</span>
             <button onClick={toggleSound} className="text-xs text-[rgb(var(--text-muted))]">
