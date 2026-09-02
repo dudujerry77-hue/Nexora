@@ -37,7 +37,10 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     });
 
-    const enriched = integrations.map((i) => ({
+    // outboundWebhookSecretCiphertext never needs to leave the server — same
+    // reasoning as apiKeys' keyHash exclusion above — even though it's
+    // encrypted (not a one-way hash), the browser has no legitimate use for it.
+    const enriched = integrations.map(({ outboundWebhookSecretCiphertext, ...i }) => ({
       ...i,
       status: computeStatus(i),
       providerLabel: PROVIDER_LABELS[i.provider]?.label ?? i.provider,

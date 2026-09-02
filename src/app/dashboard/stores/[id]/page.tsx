@@ -14,6 +14,10 @@ interface Integration {
   status: string;
   lastRequestAt: string | null;
   lastWebhookAt: string | null;
+  hasActiveKey: boolean;
+  // Real outbound product-push destination for a custom_webhook integration
+  // — see src/lib/connectors/nexoraNative.ts. Null for every other provider.
+  outboundWebhookUrl: string | null;
 }
 
 interface StoreDetail {
@@ -50,8 +54,9 @@ export default function StoreDetailPage() {
   const [store, setStore] = useState<StoreDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [provider, setProvider] = useState('custom_api');
   const [newSecret, setNewSecret] = useState<{ apiKey: string; webhookUrl: string | null; webhookSecret: string | null } | null>(null);
+  const [outboundUrlDraft, setOutboundUrlDraft] = useState<Record<string, string>>({});
+  const [newOutboundSecret, setNewOutboundSecret] = useState<{ integrationId: string; secret: string } | null>(null);
 
   function load() {
     setLoading(true);
@@ -72,8 +77,7 @@ export default function StoreDetailPage() {
     if (id && id !== selectedStoreId) setSelectedStoreId(id);
   }, [id, selectedStoreId, setSelectedStoreId]);
 
-  async function createIntegration(e: React.FormEvent) {
-    e.preventDefault();
+  async function connectIntegration(provider: string) {
     const res = await apiFetch<{ apiKey: string; webhookUrl: string | null; webhookSecret: string | null }>(
       '/api/integrations',
       { method: 'POST', body: JSON.stringify({ storeId: id, provider }) },
@@ -94,6 +98,20 @@ export default function StoreDetailPage() {
       return;
     }
     push('Integration disconnected.', 'success');
+    load();
+  }
+
+  async function saveOutboundWebhook(integrationId: string, url: string | null) {
+    const res = await apiFetch<{ outboundWebhookUrl: string | null; outboundWebhookSecret: string | null }>(
+      `/api/integrations/${integrationId}`,
+      { method: 'PATCH', body: JSON.stringify({ outboundWebhookUrl: url }) },
+    );
+    if (res.error) {
+      push(res.error.message, 'error');
+      return;
+    }
+    setNewOutboundSecret(res.data?.outboundWebhookSecret ? { integrationId, secret: res.data.outboundWebhookSecret } : null);
+    push(url ? 'Outbound push destination saved.' : 'Outbound push destination cleared.', 'success');
     load();
   }
 
@@ -125,6 +143,12 @@ export default function StoreDetailPage() {
   if (error) return <ErrorState message={error} />;
   if (!store) return null;
 
+  // Only offer providers this store doesn't already have an actively-keyed
+  // integration for — never let "Connect" duplicate one that's live (see
+  // hasActiveKey in src/lib/storeService.ts).
+  const connectedProviders = new Set(store.integrations.filter((i) => i.hasActiveKey).map((i) => i.provider));
+  const availableProviders = AVAILABLE_PROVIDERS.filter((p) => !connectedProviders.has(p.value));
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -153,49 +177,94 @@ export default function StoreDetailPage() {
       </div>
 
       <div className="card p-5">
-        <h2 className="mb-4 font-semibold">Integrations</h2>
+        <h2 className="mb-4 font-semibold">Connected integrations</h2>
         {store.integrations.length === 0 ? (
           <p className="text-sm text-[rgb(var(--text-muted))]">No integrations yet — connect one below.</p>
         ) : (
           <div className="space-y-2">
             {store.integrations.map((i) => (
-              <div key={i.id} className="flex items-center justify-between rounded-lg border border-[rgb(var(--border))] px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium">{i.providerLabel}</p>
-                  <p className="text-xs text-[rgb(var(--text-muted))]">
-                    Last webhook: {i.lastWebhookAt ? new Date(i.lastWebhookAt).toLocaleString() : 'never'}
-                  </p>
+              <div key={i.id} className="rounded-lg border border-[rgb(var(--border))] px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">{i.providerLabel}</p>
+                    <p className="text-xs text-[rgb(var(--text-muted))]">
+                      Last webhook: {i.lastWebhookAt ? new Date(i.lastWebhookAt).toLocaleString() : 'never'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <ConnectionBadge status={i.status} />
+                    <button onClick={() => disconnect(i.id)} className="text-xs text-red-500">
+                      Disconnect
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <ConnectionBadge status={i.status} />
-                  <button onClick={() => disconnect(i.id)} className="text-xs text-red-500">
-                    Disconnect
-                  </button>
-                </div>
+
+                {i.provider === 'custom_webhook' && (
+                  <div className="mt-2 border-t border-[rgb(var(--border))] pt-2">
+                    <p className="text-xs font-medium">Outbound product push destination</p>
+                    <p className="mb-2 text-xs text-[rgb(var(--text-muted))]">
+                      {i.outboundWebhookUrl ? (
+                        <span className="font-mono break-all">{i.outboundWebhookUrl}</span>
+                      ) : (
+                        'Not configured — Push will report "unsupported" until a destination URL is set.'
+                      )}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        type="url"
+                        placeholder="https://your-site.example.com/nexora/products"
+                        defaultValue={i.outboundWebhookUrl ?? ''}
+                        onChange={(e) => setOutboundUrlDraft((prev) => ({ ...prev, [i.id]: e.target.value }))}
+                        className="min-w-0 flex-1 rounded-lg border border-[rgb(var(--border))] bg-transparent px-2 py-1 text-xs"
+                      />
+                      <button
+                        onClick={() => saveOutboundWebhook(i.id, (outboundUrlDraft[i.id] ?? i.outboundWebhookUrl ?? '').trim() || null)}
+                        className="rounded-lg border border-[rgb(var(--border))] px-2 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        Save
+                      </button>
+                      {i.outboundWebhookUrl && (
+                        <button
+                          onClick={() => saveOutboundWebhook(i.id, null)}
+                          className="rounded-lg border border-red-400/50 px-2 py-1 text-xs text-red-500"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    {newOutboundSecret?.integrationId === i.id && (
+                      <div className="mt-2 rounded-lg border border-amber-400/50 bg-amber-50 p-3 text-xs dark:bg-amber-900/20">
+                        <p className="font-semibold">Save this signing secret now — it won&apos;t be shown again.</p>
+                        <p className="mt-1 font-mono break-all">{newOutboundSecret.secret}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
 
-        <form onSubmit={createIntegration} className="mt-4 flex flex-wrap items-end gap-3 border-t border-[rgb(var(--border))] pt-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium">Connect a new integration</label>
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              className="rounded-lg border border-[rgb(var(--border))] bg-transparent px-3 py-2 text-sm"
-            >
-              {AVAILABLE_PROVIDERS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
+        <div className="mt-4 border-t border-[rgb(var(--border))] pt-4">
+          <h3 className="mb-2 text-sm font-medium">Available integrations</h3>
+          {availableProviders.length === 0 ? (
+            <p className="text-xs text-[rgb(var(--text-muted))]">Every available integration type is already connected to this store.</p>
+          ) : (
+            <div className="space-y-2">
+              {availableProviders.map((p) => (
+                <div key={p.value} className="flex items-center justify-between rounded-lg border border-[rgb(var(--border))] px-3 py-2">
+                  <p className="text-sm">{p.label}</p>
+                  <button
+                    onClick={() => connectIntegration(p.value)}
+                    className="rounded-lg border border-[rgb(var(--border))] px-3 py-1.5 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    Connect
+                  </button>
+                </div>
               ))}
-            </select>
-          </div>
-          <button type="submit" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
-            Generate credentials
-          </button>
-        </form>
+            </div>
+          )}
+        </div>
 
         {newSecret && (
           <div className="mt-4 rounded-lg border border-amber-400/50 bg-amber-50 p-4 text-sm dark:bg-amber-900/20">

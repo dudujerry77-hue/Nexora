@@ -1,4 +1,5 @@
-import { Connector } from './types';
+import { Connector, CanonicalProduct, PushProductContext, PushProductResult, PushVerificationError } from './types';
+import { signWebhookBody } from '../webhookSignature';
 
 // The three implemented MVP integration paths (custom_api, custom_webhook,
 // js_sdk) all speak Nexora's own canonical payload shape already — see
@@ -77,5 +78,90 @@ function makeNativeConnector(provider: string, label: string): Connector {
 }
 
 export const customApiConnector = makeNativeConnector('custom_api', 'Nexora API');
-export const customWebhookConnector = makeNativeConnector('custom_webhook', 'Nexora Webhooks');
 export const jsSdkConnector = makeNativeConnector('js_sdk', 'Nexora JavaScript SDK');
+
+// Real outbound push (Phase 2) — custom_webhook is the one provider whose
+// whole concept is "Nexora talks to a URL the merchant controls", so it's
+// also the natural fit for the reverse direction: the merchant configures a
+// receiving URL (PATCH /api/integrations/[id]) and Nexora signs each push
+// exactly like an inbound webhook, just reversed (see signWebhookBody /
+// verifyWebhookSignature in ../webhookSignature.ts — the destination is
+// expected to verify the signature the same way Nexora's own inbound
+// webhook routes do). The destination must respond 200 with
+// `{ status: "ok", action: "created" | "updated", productRef? }` to count
+// as a genuinely confirmed push — anything else (non-2xx, unparseable
+// body, missing/invalid status or action, or the request never landing at
+// all) is reported honestly as failed or unverifiable, never as success.
+const OUTBOUND_PUSH_TIMEOUT_MS = 10_000;
+
+function isCustomWebhookPushConfigured(context: PushProductContext): boolean {
+  return typeof context.config.outboundWebhookUrl === 'string' && context.config.outboundWebhookUrl.length > 0;
+}
+
+async function pushProductViaCustomWebhook(product: CanonicalProduct, context: PushProductContext): Promise<PushProductResult> {
+  const url = context.config.outboundWebhookUrl as string | undefined;
+  const secret = context.config.outboundWebhookSecret as string | undefined;
+  if (!url || !secret) {
+    throw new Error('Outbound webhook is not configured for this integration — set a destination URL first.');
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const rawBody = JSON.stringify({ event: 'product.push', data: product });
+  const signature = signWebhookBody(secret, timestamp, rawBody);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-nexora-signature': signature,
+        'x-nexora-timestamp': String(timestamp),
+      },
+      body: rawBody,
+      signal: AbortSignal.timeout(OUTBOUND_PUSH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // Network failure/timeout — we genuinely don't know whether the
+    // destination received and acted on this before the connection died.
+    throw new PushVerificationError(
+      `Could not reach the destination webhook: ${error instanceof Error ? error.message : 'network error'}`,
+    );
+  }
+
+  if (!response.ok) {
+    let message = `Destination responded with HTTP ${response.status}.`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (typeof body?.error === 'string') message = body.error;
+    } catch {
+      // Non-JSON error body — keep the generic HTTP-status message.
+    }
+    throw new Error(message);
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new PushVerificationError('Destination returned a 2xx response but no parseable confirmation body.');
+  }
+
+  const parsed = body as { status?: string; action?: string; productRef?: string };
+  if (parsed.status !== 'ok') {
+    throw new PushVerificationError('Destination response did not confirm acceptance (expected status: "ok").');
+  }
+  if (parsed.action !== 'created' && parsed.action !== 'updated') {
+    throw new PushVerificationError(
+      'Destination confirmed acceptance but did not specify whether the product was created or updated.',
+    );
+  }
+
+  return { destinationRef: parsed.productRef ?? product.sku, action: parsed.action };
+}
+
+export const customWebhookConnector: Connector = {
+  ...makeNativeConnector('custom_webhook', 'Nexora Webhooks'),
+  isPushConfigured: isCustomWebhookPushConfigured,
+  pushProduct: pushProductViaCustomWebhook,
+};

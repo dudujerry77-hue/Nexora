@@ -12,8 +12,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   try {
     const { member } = await requireSession(req);
     const store = await assertStoreAccess({ member, storeId: params.id });
-    const { orderCount, productCount, integrations } = await storeSummary(store.id);
-    return ok({ ...store, orderCount, productCount, integrations });
+    const { orderCount, productCount, integrations, status } = await storeSummary(store.id);
+    // outboundWebhookSecretCiphertext never needs to leave the server — even
+    // though it's encrypted (never a one-way hash), the browser has no
+    // legitimate use for it. Only src/lib/productPushService.ts reads it
+    // directly from the database when actually signing an outbound push.
+    const safeIntegrations = integrations.map(({ outboundWebhookSecretCiphertext, ...safe }) => safe);
+    return ok({ ...store, status, orderCount, productCount, integrations: safeIntegrations });
   } catch (error) {
     return fail(error);
   }

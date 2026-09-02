@@ -103,4 +103,16 @@ export interface Connector {
    * request.
    */
   pushProduct?(product: CanonicalProduct, context: PushProductContext): Promise<PushProductResult>;
+  /**
+   * Whether THIS specific integration instance is actually ready to push,
+   * given its own `context.config` (e.g. a custom_webhook integration whose
+   * merchant hasn't set an outbound URL yet). Optional — a connector that
+   * needs no further per-instance setup beyond having pushProduct at all
+   * can omit this, and resolveOutboundIntegration treats it as always
+   * configured (the pre-Phase-2 default). Kept separate from pushProduct's
+   * own error handling so "not configured yet" (a capability check, no
+   * network call) stays distinct from "the destination rejected/couldn't
+   * confirm the push" (only knowable by actually attempting one).
+   */
+  isPushConfigured?(context: PushProductContext): boolean;
 }

@@ -1,28 +1,69 @@
 import type { Product, ProductVariant, Inventory } from '@prisma/client';
 import { prisma } from './db';
 import { toJson, fromJson } from './json';
+import { decryptSecret } from './crypto';
 import { storeSummary } from './storeService';
 import { getConnector } from './connectors';
 import { PushVerificationError, type CanonicalProduct, type Connector, type PushProductResult } from './connectors/types';
 
 /**
- * Resolves which (if any) of a store's actively-keyed, currently-connected
- * integrations has a connector capable of a real outbound push. "Currently
- * connected" reuses the exact same per-integration status this store's
- * summary already computes (src/lib/storeService.ts) — never a separate
- * calculation. If a store somehow has more than one connected integration
- * whose connector supports push, the first one wins; there is no UI to
- * choose among several today.
- *
- * As of this pass, no connector in src/lib/connectors defines pushProduct —
- * this always resolves to null in production. It exists so a real connector
- * can add the capability later without any change here or in the Products
- * UI (see the Connector.pushProduct doc comment).
+ * The config a connector's pushProduct/isPushConfigured needs, assembled
+ * server-side only — a secret, once decrypted here, is only ever handed to
+ * the connector call in the same request; it is never returned from any API
+ * route. Not every provider needs both fields (most need neither, since
+ * pushProduct itself is undefined for them) — this is deliberately generic
+ * rather than shaped around any one connector's specific needs.
  */
+async function loadOutboundConfig(integrationId: string): Promise<Record<string, unknown>> {
+  const row = await prisma.integration.findUnique({
+    where: { id: integrationId },
+    select: { outboundWebhookUrl: true, outboundWebhookSecretCiphertext: true },
+  });
+  return {
+    outboundWebhookUrl: row?.outboundWebhookUrl ?? null,
+    outboundWebhookSecret: row?.outboundWebhookSecretCiphertext ? decryptSecret(row.outboundWebhookSecretCiphertext) : null,
+  };
+}
+
+interface OutboundCandidate {
+  integrationId: string;
+  provider: string;
+  providerLabel: string;
+  connector: Connector;
+  config: Record<string, unknown>;
+  /** Whether THIS integration instance is actually ready (see Connector.isPushConfigured) — a connector can support push in general while a specific store hasn't set it up yet. */
+  configured: boolean;
+}
+
+/**
+ * Every currently-connected, actively-keyed integration on this store whose
+ * connector defines pushProduct at all — "currently connected" reuses the
+ * exact same per-integration status the store summary already computes
+ * (src/lib/storeService.ts), never a separate calculation. Capability
+ * detection is purely `connector.pushProduct` presence — never a hardcoded
+ * provider list — so a future connector needs no change here.
+ */
+async function findOutboundCandidates(storeId: string): Promise<OutboundCandidate[]> {
+  const { integrations } = await storeSummary(storeId);
+  const candidates: OutboundCandidate[] = [];
+  for (const integration of integrations) {
+    if (integration.status !== 'connected' || !integration.hasActiveKey) continue;
+    const connector = getConnector(integration.provider);
+    if (!connector?.pushProduct) continue;
+    const config = await loadOutboundConfig(integration.id);
+    const configured = connector.isPushConfigured
+      ? connector.isPushConfigured({ storeId, integrationId: integration.id, config })
+      : true;
+    candidates.push({ integrationId: integration.id, provider: integration.provider, providerLabel: integration.providerLabel, connector, config, configured });
+  }
+  return candidates;
+}
+
 interface ResolvedOutboundIntegration {
   integrationId: string;
   provider: string;
   providerLabel: string;
+  config: Record<string, unknown>;
   // Bound directly (rather than handing back the whole Connector) so
   // callers get a function TypeScript already knows is defined — Connector
   // itself still declares pushProduct as optional, since most connectors
@@ -30,21 +71,21 @@ interface ResolvedOutboundIntegration {
   pushProduct: NonNullable<Connector['pushProduct']>;
 }
 
+/**
+ * The first connected, actively-keyed, genuinely-configured integration
+ * that can perform a real outbound push. If a store somehow has more than
+ * one, the first wins; there is no UI to choose among several today.
+ */
 export async function resolveOutboundIntegration(storeId: string): Promise<ResolvedOutboundIntegration | null> {
-  const { integrations } = await storeSummary(storeId);
-  for (const integration of integrations) {
-    if (integration.status !== 'connected' || !integration.hasActiveKey) continue;
-    const connector = getConnector(integration.provider);
-    if (connector?.pushProduct) {
-      return {
-        integrationId: integration.id,
-        provider: integration.provider,
-        providerLabel: integration.providerLabel,
-        pushProduct: connector.pushProduct.bind(connector),
-      };
-    }
-  }
-  return null;
+  const candidate = (await findOutboundCandidates(storeId)).find((c) => c.configured);
+  if (!candidate) return null;
+  return {
+    integrationId: candidate.integrationId,
+    provider: candidate.provider,
+    providerLabel: candidate.providerLabel,
+    config: candidate.config,
+    pushProduct: candidate.connector.pushProduct!.bind(candidate.connector),
+  };
 }
 
 export interface PushCapability {
@@ -55,8 +96,20 @@ export interface PushCapability {
 }
 
 export async function getPushCapability(storeId: string): Promise<PushCapability> {
-  const resolved = await resolveOutboundIntegration(storeId);
-  if (resolved) return { supported: true, provider: resolved.provider, providerLabel: resolved.providerLabel };
+  const candidates = await findOutboundCandidates(storeId);
+  const ready = candidates.find((c) => c.configured);
+  if (ready) return { supported: true, provider: ready.provider, providerLabel: ready.providerLabel };
+
+  const unconfigured = candidates.find((c) => !c.configured);
+  if (unconfigured) {
+    return {
+      supported: false,
+      provider: unconfigured.provider,
+      providerLabel: unconfigured.providerLabel,
+      reason: `${unconfigured.providerLabel} supports outbound product sync, but it isn't configured for this store yet — set a destination URL for it first.`,
+    };
+  }
+
   return {
     supported: false,
     reason: 'This connected integration does not currently support outbound product sync.',
@@ -164,7 +217,7 @@ export async function pushProducts(params: { storeId: string; productIds: string
       const result: PushProductResult = await resolved.pushProduct(canonical, {
         storeId,
         integrationId: resolved.integrationId,
-        config: {},
+        config: resolved.config,
       });
 
       await prisma.product.update({

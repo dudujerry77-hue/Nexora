@@ -129,17 +129,26 @@ model Store {
 // provider: "custom_api" | "custom_webhook" | "js_sdk" | "woocommerce" | "shopify"
 // status: "connected" | "warning" | "disconnected"
 model Integration {
-  id                 String    @id @default(cuid())
-  storeId            String
-  provider           String
-  status             String    @default("disconnected")
-  lastRequestAt      DateTime?
-  lastWebhookAt      DateTime?
-  lastSyncAt         DateTime?
-  failedRequestCount Int       @default(0)
-  config             String    @default("{}")
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                               String    @id @default(cuid())
+  storeId                          String
+  provider                         String
+  status                           String    @default("disconnected")
+  lastRequestAt                    DateTime?
+  lastWebhookAt                    DateTime?
+  lastSyncAt                       DateTime?
+  failedRequestCount               Int       @default(0)
+  config                           String    @default("{}")
+  // Real outbound product-push destination (see
+  // src/lib/connectors/nexoraNative.ts customWebhookConnector.pushProduct) —
+  // the merchant's own receiving URL for a custom_webhook integration, and
+  // an AES-256-GCM ciphertext (never a hash — the plaintext must be
+  // recoverable to sign the outbound request) for the secret Nexora signs
+  // outbound pushes with, mirroring WebhookEndpoint.secretCiphertext's own
+  // inbound-direction pattern exactly. Null on every other provider.
+  outboundWebhookUrl               String?
+  outboundWebhookSecretCiphertext  String?
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime  @updatedAt
 
   store           Store            @relation(fields: [storeId], references: [id])
   apiKeys         ApiKey[]

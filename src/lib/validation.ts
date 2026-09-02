@@ -135,6 +135,22 @@ export const createIntegrationSchema = z.object({
   scopes: z.array(z.enum(['read', 'orders:write', 'products:write', 'inventory:write', 'customers:write'])).optional(),
 });
 
+// PATCH /api/integrations/[id] — configures a custom_webhook integration's
+// real outbound push destination (src/lib/connectors/nexoraNative.ts). Only
+// http(s) is accepted (never e.g. file:// or an internal-only scheme) —
+// `.url()` alone doesn't rule out something like `javascript:`, so this
+// mirrors the same http(s)-only restriction already used for product
+// images/logos elsewhere in this file. `null` clears the configured
+// destination (and its secret) entirely.
+export const updateIntegrationSchema = z.object({
+  outboundWebhookUrl: z
+    .string()
+    .url()
+    .max(500)
+    .refine((v) => /^https?:\/\//.test(v), { message: 'Outbound webhook URL must be an http(s) URL.' })
+    .nullable(),
+});
+
 export const webhookOrderPayloadSchema = z.object({
   event: z.enum(['order.created', 'order.updated', 'order.cancelled']),
   store_id: z.string().min(1),
