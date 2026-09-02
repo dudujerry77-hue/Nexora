@@ -254,6 +254,12 @@ model Product {
   attributes  String   @default("{}")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  // The sender's own `occurred_at` from the last webhook sync write that
+  // was actually applied (see src/lib/productService.ts). Null for
+  // products never synced via webhook, or synced without an occurred_at.
+  // This is deliberately separate from `updatedAt`, which stays Nexora's
+  // own local write timestamp and is never used for staleness ordering.
+  sourceUpdatedAt DateTime?
 
   store      Store            @relation(fields: [storeId], references: [id])
   inventory  Inventory?

@@ -15,14 +15,65 @@ export function serializeProduct<T extends Product>(product: T) {
 }
 
 /**
- * Creates or updates a product from a developer-owned integration push
- * (webhook or direct API). This is the "sync" half of the dual product-mode
- * design (see docs/API_CONTRACTS.md "Products") — a full replace of the
- * mapped fields on every push, since the developer's own system is the
- * source of truth for these products, not anything edited in the Nexora
- * dashboard.
+ * Guards the "create once, edit in place" product-management surface
+ * (POST/PATCH /api/products) — used by both the dashboard session and a
+ * direct API-key call. A developer_owned store's catalog is authoritative
+ * on the developer's own system, so letting either path write here would
+ * let Nexora silently clobber it.
+ *
+ * This deliberately does NOT gate `upsertProduct` below or the
+ * POST /api/webhooks/products route that calls it — that upsert-shaped
+ * push (re-sending the same SKU is a normal, idempotent update, not a
+ * conflict) is the real developer-owned sync channel and must keep
+ * working for a developer_owned store regardless of how it authenticates.
  */
-export async function upsertProduct(storeId: string, product: CanonicalProduct) {
+export function assertNexoraManagedProductWrites(store: { productMode: string }): void {
+  if (store.productMode !== 'nexora_managed') {
+    throw new ApiError(
+      'forbidden',
+      'This store is developer-owned — its product catalog syncs in via POST /api/webhooks/products, not through the create/edit product management endpoints.',
+    );
+  }
+}
+
+export interface UpsertProductResult {
+  product: Awaited<ReturnType<typeof prisma.product.upsert>>;
+  /** false when the write was skipped as stale/out-of-order — see below. */
+  applied: boolean;
+}
+
+/**
+ * Creates or updates a product from a developer-owned integration push
+ * (webhook). This is the "sync" half of the dual product-mode design (see
+ * docs/API_CONTRACTS.md "Products") — a full replace of the mapped fields
+ * on every push, since the developer's own system is the source of truth
+ * for these products, not anything edited in the Nexora dashboard.
+ *
+ * `occurredAt` is the sender's own `occurred_at` for this specific push
+ * (never Nexora's `updatedAt`, which stays a local write timestamp — see
+ * the `sourceUpdatedAt` column comment in schema.prisma). When an existing
+ * product already recorded a `sourceUpdatedAt` at or after this push's
+ * `occurredAt`, the push is a stale/out-of-order redelivery and is skipped
+ * entirely rather than clobbering newer data with older data. Omitting
+ * `occurredAt` (as every integration did before this field existed)
+ * preserves the previous unconditional-overwrite behavior exactly — it
+ * only ever compares against a previous `occurredAt`, never against
+ * anything else.
+ */
+export async function upsertProduct(
+  storeId: string,
+  product: CanonicalProduct,
+  options: { occurredAt?: Date } = {},
+): Promise<UpsertProductResult> {
+  const { occurredAt } = options;
+
+  if (occurredAt) {
+    const existing = await prisma.product.findUnique({ where: { storeId_sku: { storeId, sku: product.sku } } });
+    if (existing?.sourceUpdatedAt && occurredAt <= existing.sourceUpdatedAt) {
+      return { product: await prisma.product.findUniqueOrThrow({ where: { id: existing.id }, include: { inventory: true } }), applied: false };
+    }
+  }
+
   const images = product.images ?? [];
   const data = {
     name: product.name,
@@ -34,6 +85,7 @@ export async function upsertProduct(storeId: string, product: CanonicalProduct) 
     categories: toJson(product.categories ?? []),
     status: product.status ?? 'active',
     attributes: toJson(product.attributes ?? {}),
+    ...(occurredAt ? { sourceUpdatedAt: occurredAt } : {}),
   };
 
   const saved = await prisma.product.upsert({
@@ -67,7 +119,7 @@ export async function upsertProduct(storeId: string, product: CanonicalProduct) 
     ]);
   }
 
-  return saved;
+  return { product: saved, applied: true };
 }
 
 export async function deleteProductBySku(storeId: string, sku: string) {

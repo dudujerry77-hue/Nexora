@@ -129,8 +129,46 @@ export const webhookProductPayloadSchema = z.object({
   event: z.enum(['product.created', 'product.updated', 'product.deleted']),
   store_id: z.string().min(1),
   event_id: z.string().min(1),
-  occurred_at: z.string().optional(),
+  // Stricter than the other webhook envelopes' `occurred_at` (plain
+  // optional string) — this one is actually compared against
+  // Product.sourceUpdatedAt for stale/out-of-order detection, so a
+  // malformed value must fail loudly (422) rather than silently becoming
+  // an `Invalid Date` that always compares as "not stale".
+  occurred_at: z.string().datetime().optional(),
   data: z.record(z.unknown()),
+});
+
+// A server-to-server sync payload never needs an embedded data: URL — the
+// sender's own system already has these images hosted somewhere with a
+// real URL. Unlike productImageSchema (used by the dashboard's own upload
+// form, which does need data: URLs for drag/drop and device-picker
+// uploads), this channel only accepts http(s) — both to close off an
+// unbounded-size vector on an inbound integration path and because a
+// backend integration has no legitimate reason to send binary image data.
+const webhookProductImageSchema = z.string().max(2000).url().refine((v) => /^https?:\/\//.test(v), {
+  message: 'Product images synced via webhook must be an http(s) URL — data: URLs are not accepted on this channel.',
+});
+
+// The actual `data` shape for product.created/product.updated/product.deleted
+// (src/app/api/webhooks/products/route.ts), validated separately from the
+// generic envelope above since the required fields differ per event (a
+// delete only needs `sku`). Bounds mirror createProductSchema/
+// updateProductSchema exactly, so a webhook-pushed product can't smuggle in
+// anything the dashboard's own form wouldn't allow — see the http(s)-only
+// image restriction above for the one deliberate difference.
+export const webhookProductDataSchema = z.object({
+  sku: z.string().min(1).max(64),
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(4000).optional(),
+  price: z.number().int().nonnegative().optional(),
+  currency: z.string().length(3).optional(),
+  image_url: z.string().url().max(500).optional(),
+  images: z.array(webhookProductImageSchema).max(8).optional(),
+  categories: z.array(z.string().min(1).max(60)).max(20).optional(),
+  status: z.enum(['active', 'draft', 'archived']).optional(),
+  attributes: productAttributesSchema.optional(),
+  variants: z.array(productVariantSchema).max(50).optional(),
+  quantity: z.number().int().nonnegative().optional(),
 });
 
 export const webhookInventoryPayloadSchema = z.object({
