@@ -23,6 +23,9 @@ export const updateStoreSchema = z.object({
   logoUrl: z.string().url().max(500).optional().nullable(),
   status: z.enum(['connected', 'warning', 'disconnected']).optional(),
   productMode: z.enum(['nexora_managed', 'developer_owned']).optional(),
+  // Products page's main Push control's default behavior for this store —
+  // see src/lib/productPushService.ts. Per-store, never global.
+  pushDefaultMode: z.enum(['push_all', 'push_selected', 'push']).optional(),
 });
 
 export const orderItemSchema = z.object({
@@ -104,6 +107,21 @@ export const updateProductSchema = z.object({
   attributes: productAttributesSchema.optional(),
   variants: z.array(productVariantSchema).max(50).optional(),
 });
+
+// POST /api/products/push — "selected" requires at least one id (an empty
+// selection can never push anything, matching the Products page's own
+// "select at least one product" rule); "all" ignores productIds entirely
+// (the route resolves the full eligible set itself, from the server's own
+// data — a client-supplied id list is never trusted for "all").
+export const pushProductsSchema = z
+  .object({
+    storeId: z.string().min(1),
+    mode: z.enum(['all', 'selected']),
+    productIds: z.array(z.string().min(1)).max(500).optional(),
+  })
+  .refine((v) => v.mode !== 'selected' || (v.productIds && v.productIds.length > 0), {
+    message: 'productIds must be a non-empty array when mode is "selected".',
+  });
 
 export const updateInventorySchema = z.object({
   quantity: z.number().int().nonnegative().optional(),

@@ -52,6 +52,36 @@ export interface ProductCapabilities {
   customFields: boolean;
 }
 
+/**
+ * Thrown by a connector's pushProduct when the request may or may not have
+ * succeeded but the destination's acceptance could not be confirmed (e.g. a
+ * timeout, or a provider with no read-back/verification path) — distinct
+ * from a genuine rejection. Orchestration (productPushService.ts) reports
+ * this as "could not be verified", never as success and never identically
+ * to an outright failure.
+ */
+export class PushVerificationError extends Error {}
+
+/** What pushProduct returns after the destination has genuinely confirmed the write. */
+export interface PushProductResult {
+  /** An opaque identifier the destination assigned/confirmed for this product — never a secret. */
+  destinationRef: string;
+  /** Whether the destination reports this as a brand-new record or an update to one that already existed there. */
+  action: 'created' | 'updated';
+}
+
+/**
+ * Credentials/config needed to actually call the destination for a push —
+ * deliberately narrow (never the full Integration/ApiKey row) so a
+ * connector can't accidentally leak more than it needs. See
+ * src/lib/productPushService.ts for how this is assembled server-side only.
+ */
+export interface PushProductContext {
+  storeId: string;
+  integrationId: string;
+  config: Record<string, unknown>;
+}
+
 export interface Connector {
   provider: string;
   label: string;
@@ -60,4 +90,17 @@ export interface Connector {
   productCapabilities: ProductCapabilities;
   normalizeOrder(raw: unknown): CanonicalOrder;
   normalizeProduct(raw: unknown): CanonicalProduct;
+  /**
+   * Real outbound "create/update this product on the destination
+   * website/app" call — optional because most providers here are
+   * inbound-only (the developer's system calls Nexora, not the other way
+   * around) and have no destination to call. Its mere presence is the
+   * capability flag the Products page's Push UI gates on (see
+   * src/lib/productPushService.ts:resolveOutboundIntegration) — never
+   * hardcode which providers "support push" anywhere else. A real
+   * implementation must only resolve once the destination has confirmed
+   * the write (see PushProductResult) — never resolve on a merely-sent
+   * request.
+   */
+  pushProduct?(product: CanonicalProduct, context: PushProductContext): Promise<PushProductResult>;
 }

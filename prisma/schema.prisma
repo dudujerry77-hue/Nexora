@@ -90,17 +90,23 @@ model StoreAssignment {
 //              "developer_owned" (the developer's own system is the source
 //              of truth; products arrive via the existing API/webhook push
 //              paths — see docs/INTEGRATIONS.md "Product ownership modes")
+// pushDefaultMode: the Products page's main Push control's default
+// behavior for this store — "push_all" | "push_selected" | "push" (the
+// last one means the button opens the Push All/Push Selected options
+// instead of acting immediately) — see src/lib/productPushService.ts.
+// Per-store, never global.
 model Store {
-  id             String    @id @default(cuid())
-  organizationId String
-  name           String
-  logoUrl        String?
-  type           String    @default("other")
-  status         String    @default("disconnected")
-  productMode    String    @default("nexora_managed")
-  lastSyncAt     DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  organizationId  String
+  name            String
+  logoUrl         String?
+  type            String    @default("other")
+  status          String    @default("disconnected")
+  productMode     String    @default("nexora_managed")
+  pushDefaultMode String    @default("push")
+  lastSyncAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   organization     Organization      @relation(fields: [organizationId], references: [id])
   integrations     Integration[]
@@ -264,6 +270,16 @@ model Product {
   // This is deliberately separate from `updatedAt`, which stays Nexora's
   // own local write timestamp and is never used for staleness ordering.
   sourceUpdatedAt DateTime?
+  // Outbound push state — see src/lib/productPushService.ts.
+  // pushStatus: "not_pushed" | "pushing" | "pushed" | "failed" |
+  //             "unverifiable" (destination confirmation could not be
+  //             obtained — never treated as success) | "unsupported"
+  // pushDestinationRef: an opaque identifier the destination returned for
+  // this product (e.g. its remote product id) — never a secret/credential.
+  pushStatus         String    @default("not_pushed")
+  lastPushedAt       DateTime?
+  lastPushError      String?
+  pushDestinationRef String?
 
   store      Store            @relation(fields: [storeId], references: [id])
   inventory  Inventory?

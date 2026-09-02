@@ -25,7 +25,16 @@ interface StoreDetail {
   productCount: number;
   integrations: Integration[];
   lastSyncAt: string | null;
+  // Products page's main Push control's default behavior for this store —
+  // see src/lib/productPushService.ts. Per-store, never global.
+  pushDefaultMode: 'push_all' | 'push_selected' | 'push';
 }
+
+const PUSH_MODE_OPTIONS: { value: StoreDetail['pushDefaultMode']; label: string; description: string }[] = [
+  { value: 'push_all', label: 'Push All', description: 'Push all eligible products to the connected website/app.' },
+  { value: 'push_selected', label: 'Push Selected', description: 'Select product cards first, then push only the selected products.' },
+  { value: 'push', label: 'Push', description: 'Open push options so you can choose Push All or Push Selected.' },
+];
 
 const AVAILABLE_PROVIDERS = [
   { value: 'custom_api', label: 'Nexora API' },
@@ -86,6 +95,19 @@ export default function StoreDetailPage() {
     }
     push('Integration disconnected.', 'success');
     load();
+  }
+
+  async function savePushDefaultMode(mode: StoreDetail['pushDefaultMode']) {
+    if (!store) return;
+    const previous = store.pushDefaultMode;
+    setStore({ ...store, pushDefaultMode: mode }); // optimistic — only one option can ever be active at a time
+    const res = await apiFetch(`/api/stores/${id}`, { method: 'PATCH', body: JSON.stringify({ pushDefaultMode: mode }) });
+    if (res.error) {
+      setStore((prev) => (prev ? { ...prev, pushDefaultMode: previous } : prev));
+      push(res.error.message, 'error');
+      return;
+    }
+    push('Product push behavior saved.', 'success');
   }
 
   async function deleteStore() {
@@ -185,6 +207,34 @@ export default function StoreDetailPage() {
             )}
           </div>
         )}
+      </div>
+
+      <div className="card p-5">
+        <h2 className="font-semibold">Product Push Behavior</h2>
+        <p className="mt-1 text-sm text-[rgb(var(--text-muted))]">
+          The default action for the Push control on this store&apos;s Products page. Only one can be active at a time.
+        </p>
+        <div className="mt-4 space-y-3">
+          {PUSH_MODE_OPTIONS.map((opt) => (
+            <label
+              key={opt.value}
+              className="flex cursor-pointer items-start gap-3 rounded-lg border border-[rgb(var(--border))] p-3 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-900/10"
+            >
+              <input
+                type="radio"
+                name="pushDefaultMode"
+                value={opt.value}
+                checked={store.pushDefaultMode === opt.value}
+                onChange={() => savePushDefaultMode(opt.value)}
+                className="mt-1"
+              />
+              <span>
+                <span className="block text-sm font-medium">{opt.label}</span>
+                <span className="block text-xs text-[rgb(var(--text-muted))]">{opt.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
       </div>
     </div>
   );

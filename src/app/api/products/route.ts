@@ -9,6 +9,7 @@ import { consume } from '@/lib/rateLimit';
 import { toJson } from '@/lib/json';
 import { serializeProduct, assertStoreEligibleForProductCreation } from '@/lib/productService';
 import { storeSummary } from '@/lib/storeService';
+import { sortByPushStatus } from '@/lib/productPushService';
 
 // These routes read the session cookie, so they can never be statically
 // generated — declare that explicitly to avoid Next's build-time
@@ -36,7 +37,10 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     });
 
-    return ok(products.map(serializeProduct));
+    // Not-yet-(successfully)-pushed products first, already-pushed ones
+    // last (section 12) — a stable sort on top of the DB's createdAt-desc
+    // order, so relative ordering within each group is unchanged.
+    return ok(sortByPushStatus(products).map(serializeProduct));
   } catch (error) {
     return fail(error);
   }
