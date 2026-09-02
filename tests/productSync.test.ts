@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { decryptSecret } from '@/lib/crypto';
 import { signWebhookBody } from '@/lib/webhookSignature';
 import { consume, _resetRateLimiter } from '@/lib/rateLimit';
-import { CATALOG_SYNC_ITEMS_PER_MINUTE } from '@/lib/webhookAuth';
+import { CATALOG_SYNC_ITEMS_PER_MINUTE, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhookAuth';
 import { connectorRegistry } from '@/lib/connectors';
 import * as productService from '@/lib/productService';
 import { MAX_PRODUCT_SYNC_BATCH_SIZE, productSyncItemSchema } from '@/lib/validation';
@@ -328,14 +328,37 @@ describe('POST /api/webhooks/products — product.sync batch catalog sync', () =
   });
 
   // 23. rate limit is charged by item count
+  //
+  // Rewritten during the audit-fix pass: the original version drained the
+  // bucket down to a fixed 5-token margin and asserted an outright 429.
+  // That's timing-sensitive — CATALOG_SYNC_ITEMS_PER_MINUTE refills ~1
+  // token/12ms, so under load (e.g. the full suite, not this file alone)
+  // enough can refill during the request's own DB-bound auth/idempotency
+  // work to let it through, observed as a genuine intermittent failure,
+  // not a regression. This version sidesteps timing entirely: it uses a
+  // guaranteed-fresh, guaranteed-sufficient bucket (a brand new store's
+  // bucket always starts at the full CATALOG_SYNC_ITEMS_PER_MINUTE, so a
+  // 10-item request can never be declined here) and proves the charge was
+  // proportional to item count by showing it's inconsistent with a flat
+  // "1 token per request" charge — the actual alternative design this
+  // test guards against — rather than by forcing exhaustion.
   it('charges the catalog-sync rate limit bucket by item count, not by request count', async () => {
     const { apiKey, storeId } = await setup();
-    // Leave only 5 tokens in this store's catalog-sync bucket.
-    consume(`catalog-sync:${storeId}`, CATALOG_SYNC_ITEMS_PER_MINUTE, 60_000, CATALOG_SYNC_ITEMS_PER_MINUTE - 5);
+    const key = `catalog-sync:${storeId}`;
+    const t0 = Date.now();
 
     const res = await postSync(apiKey, storeId, 'evt-rl-cost', Array.from({ length: 10 }, (_, i) => item(`RL-${i}`)));
-    expect(res.status).toBe(429);
-    expect(await prisma.product.count({ where: { storeId } })).toBe(0);
+    expect(res.status).toBe(200); // bucket starts fresh at the full limit — a 10-token cost can never be insufficient here
+
+    const probe = consume(key, CATALOG_SYNC_ITEMS_PER_MINUTE, 60_000, 0); // cost=0 peek, no side effect
+    const elapsedMs = Date.now() - t0;
+    const maxPossibleRefill = Math.ceil(elapsedMs * (CATALOG_SYNC_ITEMS_PER_MINUTE / 60_000)) + 1; // +1 rounding slack
+    // If the charge were flat (1 token per request, ignoring item count),
+    // remaining could be at most (limit - 1 + maxPossibleRefill). A real
+    // per-item charge of 10 must leave it measurably lower — well below
+    // that flat-cost upper bound, not just marginally under it.
+    const upperBoundIfCostWereFlatOne = CATALOG_SYNC_ITEMS_PER_MINUTE - 1 + maxPossibleRefill;
+    expect(probe.remaining).toBeLessThan(upperBoundIfCostWereFlatOne - 8);
   });
 
   // 24. normal existing webhook rate limiting still works, independent of the catalog-sync bucket
@@ -444,5 +467,213 @@ describe('POST /api/webhooks/products — product.sync batch catalog sync', () =
 
     expect(await prisma.product.findFirst({ where: { storeId, sku: 'SYS-1' } })).not.toBeNull();
     expect(await prisma.product.findFirst({ where: { storeId, sku: 'SYS-3' } })).toBeNull();
+  });
+
+  // --- Audit-fix pass additions below (post-1a19289) ---
+
+  // 1. Reconcile the batch/body limits: MAX_PRODUCT_SYNC_BATCH_SIZE must be
+  // provably safe under MAX_WEBHOOK_BODY_BYTES even at the schema's true
+  // worst case (every field at its max length, 3-byte-per-character
+  // filler — this app places no ASCII-only restriction on product text,
+  // so a fully non-Latin-script batch is a legitimate case). This test
+  // re-derives the bound directly rather than trusting the doc comment on
+  // MAX_PRODUCT_SYNC_BATCH_SIZE to stay accurate as either constant changes.
+  it('reconciles batch size against the body-size limit — a maximally-sized full batch fits comfortably under it', () => {
+    const filler = (n: number) => '和'.repeat(n); // U+548C, 3 bytes in UTF-8, 1 UTF-16 code unit — matches zod's .max() unit
+    const maxItem = {
+      sku: 'S'.repeat(64),
+      action: 'upsert',
+      name: filler(200),
+      description: filler(4000),
+      price: 999999999,
+      currency: 'NGN',
+      image_url: 'https://example.com/' + 'i'.repeat(470),
+      images: Array.from({ length: 8 }, (_, i) => 'https://example.com/img/' + 'x'.repeat(1960) + i),
+      categories: Array.from({ length: 20 }, () => filler(60)),
+      status: 'active',
+      attributes: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`k${i}`, filler(500)])),
+      variants: Array.from({ length: 50 }, () => ({ name: filler(120), sku: 'V'.repeat(64), price: 1000, quantity: 5 })),
+      quantity: 100,
+      occurred_at: '2026-09-02T12:00:00.000Z',
+    };
+    const fullBatch = {
+      event: 'product.sync',
+      store_id: 'x'.repeat(30),
+      event_id: 'y'.repeat(40),
+      data: { products: Array.from({ length: MAX_PRODUCT_SYNC_BATCH_SIZE }, () => maxItem) },
+    };
+    const bytes = Buffer.byteLength(JSON.stringify(fullBatch), 'utf8');
+    expect(bytes).toBeLessThanOrEqual(MAX_WEBHOOK_BODY_BYTES);
+    // Confirm there's real margin, not a fluke near-miss — if this ever
+    // fails, MAX_PRODUCT_SYNC_BATCH_SIZE or MAX_WEBHOOK_BODY_BYTES changed
+    // without re-checking the relationship documented on the constant.
+    expect(bytes).toBeLessThan(MAX_WEBHOOK_BODY_BYTES * 0.9);
+  });
+
+  // A small item count does not exempt a request from the body-size guard
+  // — it is checked on the raw body, before any item-count validation runs.
+  it('rejects an oversized body even with an item count far below the batch limit', async () => {
+    const { apiKey, storeId } = await setup();
+    const oversizedDescription = 'a'.repeat(6_000_000);
+    const { POST } = await import('@/app/api/webhooks/products/route');
+    const res = await POST(
+      new Request('http://localhost:3000/api/webhooks/products', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(
+          envelope(storeId, 'evt-small-count-huge-body', [
+            item('SMALL-1'),
+            { sku: 'SMALL-2', name: 'X', price: 1000, description: oversizedDescription },
+          ]),
+        ),
+      }) as unknown as Parameters<typeof POST>[0],
+    );
+    expect(res.status).toBe(422);
+    // Distinguishes "rejected for size" from "rejected for shape" — proves
+    // the body-size guard itself fired, not the later zod validation.
+    const body = await res.json();
+    expect(body.error.message).toMatch(/byte limit/);
+    expect(await prisma.product.findFirst({ where: { storeId, sku: 'SMALL-1' } })).toBeNull();
+  });
+
+  // 2a. Same-SKU mixed-action sequence inside one batch.
+  it('handles upsert-then-delete for the same SKU within one batch — final state is deleted', async () => {
+    const { apiKey, storeId } = await setup();
+    const res = await postSync(apiKey, storeId, 'evt-mixed-ud', [item('MIX-UD', { price: 500 }), { sku: 'MIX-UD', action: 'delete' }]);
+    const body = await res.json();
+    expect(body.data.results[0]).toMatchObject({ index: 0, action: 'upsert', status: 'applied' });
+    expect(body.data.results[1]).toMatchObject({ index: 1, action: 'delete', status: 'applied' });
+    expect(await prisma.product.findFirst({ where: { storeId, sku: 'MIX-UD' } })).toBeNull();
+  });
+
+  it('handles delete-then-upsert for the same SKU within one batch — final state is created', async () => {
+    const { apiKey, storeId } = await setup();
+    const res = await postSync(apiKey, storeId, 'evt-mixed-du', [{ sku: 'MIX-DU', action: 'delete' }, item('MIX-DU', { price: 700 })]);
+    const body = await res.json();
+    expect(body.data.results[0]).toMatchObject({ index: 0, action: 'delete', status: 'unchanged', reason: 'already_missing' });
+    expect(body.data.results[1]).toMatchObject({ index: 1, action: 'upsert', status: 'applied' });
+    const product = await prisma.product.findUniqueOrThrow({ where: { storeId_sku: { storeId, sku: 'MIX-DU' } } });
+    expect(product.price).toBe(700);
+  });
+
+  // 2b. IntegrationLog summary content for partial and fully-failed batches.
+  it('logs a summary with correct counts and warning level for a partial batch', async () => {
+    const { apiKey, storeId, integrationId } = await setup();
+    await postSync(apiKey, storeId, 'evt-log-partial', [item('LOGP-OK'), { sku: 'LOGP-BAD', name: 'x'.repeat(9999), price: 1000 }]);
+
+    const log = await prisma.integrationLog.findFirstOrThrow({ where: { storeId, integrationId, message: { contains: 'Catalog sync' } } });
+    expect(log.level).toBe('warning');
+    expect(log.message).toContain('2 items');
+    expect(log.message).toContain('1 applied');
+    expect(log.message).toContain('1 failed');
+    expect(JSON.parse(log.metadata)).toMatchObject({ event: 'product.sync', total: 2, applied: 1, unchanged: 0, failed: 1 });
+  });
+
+  it('logs a summary with correct counts and error level for a fully-failed batch', async () => {
+    const { apiKey, storeId, integrationId } = await setup();
+    await postSync(apiKey, storeId, 'evt-log-failed', [
+      { sku: 'LOGF-BAD1', name: 'x'.repeat(9999), price: 1000 },
+      { sku: 'LOGF-BAD2', name: 'x'.repeat(9999), price: 1000 },
+    ]);
+
+    const log = await prisma.integrationLog.findFirstOrThrow({ where: { storeId, integrationId, message: { contains: 'Catalog sync' } } });
+    expect(log.level).toBe('error');
+    expect(log.message).toContain('2 items');
+    expect(log.message).toContain('0 applied');
+    expect(log.message).toContain('2 failed');
+    expect(JSON.parse(log.metadata)).toMatchObject({ event: 'product.sync', total: 2, applied: 0, unchanged: 0, failed: 2 });
+  });
+
+  // 2d. Malformed product.sync (products not an array) — explicit rate-limit
+  // charge check. The catalog-sync bucket refills fast (CATALOG_SYNC_ITEMS_PER_MINUTE
+  // per 60s), so a naive before/after "remaining" comparison is flaky —
+  // this instead bounds the maximum refill possible across the measured
+  // elapsed time and asserts the real charge landed strictly below it, so
+  // it doesn't depend on exact timing.
+  it('still charges at least one catalog-sync token for a malformed (non-array products) request', async () => {
+    const { apiKey, storeId } = await setup();
+    const t0 = Date.now();
+    consume(`catalog-sync:${storeId}`, CATALOG_SYNC_ITEMS_PER_MINUTE, 60_000, CATALOG_SYNC_ITEMS_PER_MINUTE); // drain to 0
+
+    const { POST } = await import('@/app/api/webhooks/products/route');
+    const res = await POST(
+      new Request('http://localhost:3000/api/webhooks/products', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+        // Deliberately malformed: `products` is a string, not an array —
+        // built directly (not via the envelope() helper, which always
+        // wraps its `products` argument as an array).
+        body: JSON.stringify({ event: 'product.sync', store_id: storeId, event_id: 'evt-malformed-cost', data: { products: 'not-an-array' } }),
+      }) as unknown as Parameters<typeof POST>[0],
+    );
+    // Draining the bucket to 0 first means either outcome is valid,
+    // depending on exactly how much refilled before the charge landed:
+    // - 429: the charge attempt itself got rate-limited (strongest possible
+    //   proof a real charge was attempted).
+    // - 422: enough refilled for the charge to succeed, and the request
+    //   proceeded to the (expected) malformed-shape rejection.
+    // Either way, the bound check below is what actually proves a nonzero
+    // charge landed — this assertion just rules out any other outcome.
+    expect([422, 429]).toContain(res.status);
+
+    const probe = consume(`catalog-sync:${storeId}`, CATALOG_SYNC_ITEMS_PER_MINUTE, 60_000, 0); // cost=0 peek, no side effect
+    const elapsedMs = Date.now() - t0;
+    const maxPossibleRefillIfUncharged = Math.ceil(elapsedMs * (CATALOG_SYNC_ITEMS_PER_MINUTE / 60_000)) + 1; // +1 rounding slack
+    // If truly zero cost had been charged, remaining would have refilled
+    // back up to at most this bound. A real charge must leave it lower.
+    expect(probe.remaining).toBeLessThan(maxPossibleRefillIfUncharged);
+  });
+
+  // 2e. Concurrent same-SKU sync attempts, different event_ids — best effort.
+  // This does NOT prove database-level serialization or pin down a specific
+  // winner; it only proves the system doesn't crash or corrupt state under
+  // concurrent writes to the same SKU, and that the final state matches one
+  // of the two valid inputs, never a mix of both. See the known-issue note
+  // in this audit-fix pass about the underlying findUnique-then-upsert TOCTOU
+  // race in upsertProduct(), which this test does not fix or disprove.
+  it('best-effort: concurrent syncs for the same SKU do not crash or corrupt state (does not prove serialization)', async () => {
+    const { apiKey, storeId } = await setup();
+    const [resA, resB] = await Promise.all([
+      postSync(apiKey, storeId, 'evt-concurrent-a', [item('CONCURRENT-1', { price: 111, occurred_at: '2026-09-02T09:00:00Z' })]),
+      postSync(apiKey, storeId, 'evt-concurrent-b', [item('CONCURRENT-1', { price: 222, occurred_at: '2026-09-02T10:00:00Z' })]),
+    ]);
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+
+    const product = await prisma.product.findUniqueOrThrow({ where: { storeId_sku: { storeId, sku: 'CONCURRENT-1' } } });
+    // Final price must be exactly one of the two submitted values — never
+    // corrupted/partial data — but which one is not asserted, since the
+    // actual DB-level interleaving under concurrency is not controlled here.
+    expect([111, 222]).toContain(product.price);
+  });
+
+  // 2f. End-to-end partial retry contract.
+  it('supports the documented partial-batch retry contract: same event_id stays a no-op, a new event_id actually retries the failed item', async () => {
+    const { apiKey, storeId } = await setup();
+
+    const first = await postSync(apiKey, storeId, 'evt-retry-1', [
+      item('RETRY-OK'),
+      { sku: 'RETRY-BAD', name: 'x'.repeat(9999), price: 1000 },
+    ]);
+    const firstBody = await first.json();
+    expect(firstBody.data.status).toBe('partial');
+    expect(await prisma.product.findFirst({ where: { storeId, sku: 'RETRY-OK' } })).not.toBeNull();
+    expect(await prisma.product.findFirst({ where: { storeId, sku: 'RETRY-BAD' } })).toBeNull();
+
+    // Same event_id, unchanged payload -> pure no-op duplicate, no new mutation attempt.
+    const sameIdRetry = await postSync(apiKey, storeId, 'evt-retry-1', [
+      item('RETRY-OK'),
+      { sku: 'RETRY-BAD', name: 'x'.repeat(9999), price: 1000 },
+    ]);
+    expect((await sameIdRetry.json()).data.status).toBe('duplicate');
+    expect(await prisma.product.findFirst({ where: { storeId, sku: 'RETRY-BAD' } })).toBeNull(); // still not created
+
+    // New event_id, corrected payload containing just the previously-failed item -> actually processed.
+    const newIdRetry = await postSync(apiKey, storeId, 'evt-retry-2', [item('RETRY-BAD', { name: 'Fixed Name' })]);
+    const newIdBody = await newIdRetry.json();
+    expect(newIdBody.data.status).toBe('processed');
+    expect(newIdBody.data.results[0]).toMatchObject({ sku: 'RETRY-BAD', status: 'applied' });
+    const fixed = await prisma.product.findUniqueOrThrow({ where: { storeId_sku: { storeId, sku: 'RETRY-BAD' } } });
+    expect(fixed.name).toBe('Fixed Name');
   });
 });

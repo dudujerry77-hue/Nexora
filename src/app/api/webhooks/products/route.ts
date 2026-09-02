@@ -34,6 +34,16 @@ export async function POST(req: NextRequest) {
       // Charges the separate catalog-sync bucket by actual item count,
       // computed before the idempotency record is written. Every other
       // event type returns null here — zero extra charge, unchanged.
+      //
+      // A malformed request (`products` missing or not an array) returns 0
+      // here, not null — deliberately still charged. `null` means "not a
+      // batch at all, skip the extra bucket entirely" (every non-sync
+      // event); `0` means "this claimed to be a batch, so charge it
+      // something for the attempt" — authenticateAndDedupeWebhook clamps
+      // any non-null value to at least 1 via `Math.max(itemCost, 1)`, so a
+      // malformed batch is never a free attempt against the flat webhook
+      // bucket alone. See "malformed product.sync still charges at least
+      // 1 catalog-sync token" in tests/productSync.test.ts.
       itemCost: (envelope) => {
         if (envelope.event !== 'product.sync') return null;
         const products = (envelope.data as Record<string, unknown>).products;

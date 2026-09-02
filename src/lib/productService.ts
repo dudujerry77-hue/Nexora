@@ -196,7 +196,7 @@ function bestEffortAction(raw: unknown): 'upsert' | 'delete' | undefined {
  * Each item is validated and written independently, in input order — a
  * bad item can only ever produce its own "failed" result, never abort a
  * sibling's write, and no item's write is wrapped in another's
- * transaction (a batch of 300 is 300 independent database operations, not
+ * transaction (an N-item batch is N independent database operations, not
  * one giant one). Because items run strictly in order and each write
  * lands immediately, a later item for the same SKU deterministically wins
  * over an earlier one — unless the existing sourceUpdatedAt staleness
@@ -209,6 +209,17 @@ function bestEffortAction(raw: unknown): 'upsert' | 'delete' | undefined {
  * rather than repeating the same failure hundreds of times; every
  * remaining item is reported "not_attempted" rather than silently
  * omitted, so the response always accounts for every item submitted.
+ *
+ * KNOWN SCALABILITY LIMIT (not addressed in this pass — correctness and
+ * contract clarity were the priority, not throughput): there is no
+ * batching/pipelining of the underlying DB calls across items. An item
+ * carrying `occurred_at` costs up to 3 sequential round trips
+ * (upsertProduct's staleness findUnique, the upsert itself, and the
+ * variants $transaction if present) — fully sequential, never
+ * parallelized. For MAX_PRODUCT_SYNC_BATCH_SIZE items that's up to ~3×N
+ * round trips in one request. Fine on SQLite; on a real networked DB this
+ * is the reason batch size can't simply be raised back up for throughput
+ * without first addressing this. Left for the next phase.
  */
 export async function syncProductBatch(params: {
   storeId: string;
@@ -286,6 +297,17 @@ export async function syncProductBatch(params: {
       // Not a validation or "already missing" outcome — looks systemic
       // (e.g. a DB-level failure). Stop rather than repeat it hundreds of
       // times; see the function doc comment above.
+      //
+      // COUPLING WARNING: this classification is correct only because
+      // upsertProduct()/deleteProductBySku() never throw a business-level
+      // ApiError today besides deleteProductBySku's 'not_found' (handled
+      // above, before reaching this catch). If either is ever extended to
+      // throw a new business ApiError (e.g. a new invariant), it would
+      // land here and be wrongly treated as "systemic" — aborting the rest
+      // of the batch instead of failing just this one item. Any future
+      // business-error addition to those two functions must also add an
+      // explicit case here (like the 'not_found' one above), not just rely
+      // on this catch-all.
       aborted = true;
     }
   }

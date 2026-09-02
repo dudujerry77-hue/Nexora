@@ -175,7 +175,22 @@ export const webhookProductDataSchema = z.object({
 // the one named constant governing batch size — referenced by the route,
 // the rate limiter's cost calculation, and tests, so it's never duplicated
 // as a bare number anywhere.
-export const MAX_PRODUCT_SYNC_BATCH_SIZE = 300;
+//
+// Sized so it's mathematically guaranteed to fit under MAX_WEBHOOK_BODY_BYTES
+// (webhookAuth.ts) even in the worst case — not just typical usage. A
+// post-launch audit found the original value of 300 could reach ~14.7MB
+// with every field at its schema maximum using single-byte characters;
+// re-measuring with 3-byte-per-character filler (representative of
+// CJK/Cyrillic/Arabic script — this app places no ASCII-only restriction
+// on product names/descriptions, so a fully non-Latin-script batch is a
+// legitimate case, not an edge case) puts one maximally-sized item at
+// ~101,761 bytes. 40 * 101,761 ≈ 4.07MB, ~18% under the 5MB cap — so any
+// batch that validates against this limit can never be surprised by the
+// body-size check afterward. See "reconciles batch size against the
+// body-size limit" in tests/productSync.test.ts, which re-derives this
+// bound directly from the schema rather than trusting this comment to
+// stay accurate as either constant changes.
+export const MAX_PRODUCT_SYNC_BATCH_SIZE = 40;
 
 // One item inside a product.sync batch. Field bounds are identical to
 // webhookProductDataSchema above (same dashboard-equivalent limits,
