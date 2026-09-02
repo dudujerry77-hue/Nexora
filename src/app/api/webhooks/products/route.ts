@@ -1,8 +1,13 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
-import { webhookProductPayloadSchema, webhookProductDataSchema } from '@/lib/validation';
-import { authenticateAndDedupeWebhook, markWebhookProcessed, markWebhookFailed } from '@/lib/webhookAuth';
-import { upsertProduct, deleteProductBySku } from '@/lib/productService';
+import {
+  webhookProductPayloadSchema,
+  webhookProductDataSchema,
+  productSyncBatchShapeSchema,
+  productSyncItemSchema,
+} from '@/lib/validation';
+import { authenticateAndDedupeWebhook, markWebhookProcessed, markWebhookFailed, logInbound, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhookAuth';
+import { upsertProduct, deleteProductBySku, syncProductBatch } from '@/lib/productService';
 import { connectorRegistry } from '@/lib/connectors';
 import { ok, fail } from '@/lib/apiResponse';
 
@@ -22,7 +27,19 @@ async function resolveConnector(integrationId: string | null) {
 export async function POST(req: NextRequest) {
   let ctx;
   try {
-    ctx = await authenticateAndDedupeWebhook(req, webhookProductPayloadSchema, 'products:write');
+    ctx = await authenticateAndDedupeWebhook(req, webhookProductPayloadSchema, 'products:write', {
+      // Only enforced here (products), not for orders/inventory/customers —
+      // see MAX_WEBHOOK_BODY_BYTES's doc comment in webhookAuth.ts.
+      maxBodyBytes: MAX_WEBHOOK_BODY_BYTES,
+      // Charges the separate catalog-sync bucket by actual item count,
+      // computed before the idempotency record is written. Every other
+      // event type returns null here — zero extra charge, unchanged.
+      itemCost: (envelope) => {
+        if (envelope.event !== 'product.sync') return null;
+        const products = (envelope.data as Record<string, unknown>).products;
+        return Array.isArray(products) ? products.length : 0;
+      },
+    });
   } catch (error) {
     return fail(error);
   }
@@ -31,6 +48,35 @@ export async function POST(req: NextRequest) {
 
   try {
     const { envelope, storeId } = ctx;
+
+    if (envelope.event === 'product.sync') {
+      // Whole-request shape only (is `products` an array, 1..300 items) —
+      // per-item field validation happens inside syncProductBatch so one
+      // bad item can't invalidate its siblings.
+      const { products } = productSyncBatchShapeSchema.parse(envelope.data);
+      const connector = await resolveConnector(ctx.integrationId);
+
+      const result = await syncProductBatch({
+        storeId,
+        items: products,
+        parseItem: (raw) => productSyncItemSchema.parse(raw),
+        normalizeProduct: (raw) => connector.normalizeProduct(raw),
+      });
+
+      // One summary log line for the whole batch, never one per item —
+      // counts only, no product payloads, no keys/secrets.
+      await logInbound({
+        storeId,
+        integrationId: ctx.integrationId,
+        level: result.failed === 0 ? 'info' : result.applied + result.unchanged > 0 ? 'warning' : 'error',
+        message: `Catalog sync: ${result.total} items — ${result.applied} applied, ${result.unchanged} unchanged, ${result.failed} failed.`,
+        metadata: { event: 'product.sync', total: result.total, applied: result.applied, unchanged: result.unchanged, failed: result.failed },
+      });
+
+      await markWebhookProcessed(ctx.storeId, ctx.envelope.event_id);
+      return ok(result);
+    }
+
     // Bounded, http(s)-only-image validation — mirrors the dashboard's
     // createProductSchema/updateProductSchema (see webhookProductDataSchema
     // in src/lib/validation.ts) so a webhook push can't smuggle in

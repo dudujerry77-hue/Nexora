@@ -126,7 +126,7 @@ export const webhookOrderPayloadSchema = z.object({
 });
 
 export const webhookProductPayloadSchema = z.object({
-  event: z.enum(['product.created', 'product.updated', 'product.deleted']),
+  event: z.enum(['product.created', 'product.updated', 'product.deleted', 'product.sync']),
   store_id: z.string().min(1),
   event_id: z.string().min(1),
   // Stricter than the other webhook envelopes' `occurred_at` (plain
@@ -169,6 +169,44 @@ export const webhookProductDataSchema = z.object({
   attributes: productAttributesSchema.optional(),
   variants: z.array(productVariantSchema).max(50).optional(),
   quantity: z.number().int().nonnegative().optional(),
+});
+
+// Phase 1 batch catalog sync (product.sync). MAX_PRODUCT_SYNC_BATCH_SIZE is
+// the one named constant governing batch size — referenced by the route,
+// the rate limiter's cost calculation, and tests, so it's never duplicated
+// as a bare number anywhere.
+export const MAX_PRODUCT_SYNC_BATCH_SIZE = 300;
+
+// One item inside a product.sync batch. Field bounds are identical to
+// webhookProductDataSchema above (same dashboard-equivalent limits,
+// including the http(s)-only image restriction) plus `action` and a
+// per-item `occurred_at` for this specific item's own staleness check —
+// the top-level envelope's `occurred_at` is not used for batch items.
+export const productSyncItemSchema = z.object({
+  sku: z.string().min(1).max(64),
+  action: z.enum(['upsert', 'delete']).default('upsert'),
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(4000).optional(),
+  price: z.number().int().nonnegative().optional(),
+  currency: z.string().length(3).optional(),
+  image_url: z.string().url().max(500).optional(),
+  images: z.array(webhookProductImageSchema).max(8).optional(),
+  categories: z.array(z.string().min(1).max(60)).max(20).optional(),
+  status: z.enum(['active', 'draft', 'archived']).optional(),
+  attributes: productAttributesSchema.optional(),
+  variants: z.array(productVariantSchema).max(50).optional(),
+  quantity: z.number().int().nonnegative().optional(),
+  occurred_at: z.string().datetime().optional(),
+});
+
+// Whole-request shape check only — deliberately NOT z.array(productSyncItemSchema).
+// Validating every item as part of one array schema would make a single bad
+// item fail the entire parse, discarding every valid sibling with it. Each
+// item is instead parsed independently, one at a time, inside
+// syncProductBatch() (src/lib/productService.ts) so one bad item can only
+// ever produce its own "failed" result.
+export const productSyncBatchShapeSchema = z.object({
+  products: z.array(z.unknown()).min(1).max(MAX_PRODUCT_SYNC_BATCH_SIZE),
 });
 
 export const webhookInventoryPayloadSchema = z.object({

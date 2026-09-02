@@ -33,4 +33,29 @@ describe('rate limiter', () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(consume(key, 2, 100).allowed).toBe(true);
   });
+
+  // Added for the product.sync batch rate limiter (cost defaults to 1,
+  // preserving every call above unchanged).
+  it('debits a multi-unit cost in one call when provided', () => {
+    const key = 'cost-key';
+    const result = consume(key, 100, 60_000, 40);
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(60);
+  });
+
+  it('rejects a cost larger than the remaining bucket, without partially debiting it', () => {
+    const key = 'cost-key-2';
+    consume(key, 100, 60_000, 90);
+    const result = consume(key, 100, 60_000, 20);
+    expect(result.allowed).toBe(false);
+    expect(result.remaining).toBe(10); // untouched by the rejected attempt
+  });
+
+  it('omitting cost behaves exactly like cost=1 (existing callers unaffected)', () => {
+    const keyA = 'default-cost-a';
+    const keyB = 'default-cost-b';
+    const withoutCost = consume(keyA, 10, 60_000);
+    const withExplicitCost1 = consume(keyB, 10, 60_000, 1);
+    expect(withoutCost).toEqual(withExplicitCost1);
+  });
 });

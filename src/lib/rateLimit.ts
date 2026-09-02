@@ -16,7 +16,13 @@ export interface RateLimitResult {
   retryAfterMs: number;
 }
 
-export function consume(key: string, limit: number, windowMs: number): RateLimitResult {
+/**
+ * `cost` lets one call debit more than one token — e.g. a product.sync
+ * batch charging once per item instead of once per HTTP request. Every
+ * existing caller omits it, so `cost` defaults to 1 and behaves exactly as
+ * before (see rateLimit.test.ts's original three cases, unchanged).
+ */
+export function consume(key: string, limit: number, windowMs: number, cost: number = 1): RateLimitResult {
   const now = Date.now();
   const existing = buckets.get(key);
   const refillRate = limit / windowMs; // tokens per ms
@@ -31,13 +37,14 @@ export function consume(key: string, limit: number, windowMs: number): RateLimit
     bucket.lastRefillMs = now;
   }
 
-  if (bucket.tokens >= 1) {
-    bucket.tokens -= 1;
+  if (bucket.tokens >= cost) {
+    bucket.tokens -= cost;
     return { allowed: true, remaining: Math.floor(bucket.tokens), retryAfterMs: 0 };
   }
 
+  const missing = cost - bucket.tokens;
   const msPerToken = 1 / refillRate;
-  return { allowed: false, remaining: 0, retryAfterMs: Math.ceil(msPerToken) };
+  return { allowed: false, remaining: Math.floor(bucket.tokens), retryAfterMs: Math.ceil(missing * msPerToken) };
 }
 
 /** Test-only: clears all buckets so tests don't leak state across cases. */

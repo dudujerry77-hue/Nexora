@@ -40,7 +40,21 @@ async function findWebhookIntegration(storeId: string) {
   });
 }
 
-async function logInbound(params: {
+// 5MB is generous headroom above any legitimate single-event payload or a
+// 300-item product.sync batch (see MAX_PRODUCT_SYNC_BATCH_SIZE in
+// validation.ts), while still rejecting an obviously abusive body before
+// JSON.parse/zod ever run. Only opted into via `options.maxBodyBytes` below
+// — orders/inventory/customers don't pass it, so they get no size check at
+// all, identical to their behavior before this existed.
+export const MAX_WEBHOOK_BODY_BYTES = 5_000_000;
+
+// Charged per product.sync item (see `options.itemCost` below), separately
+// from the flat per-request `webhook:{storeId}` bucket above — a batch of
+// hundreds of items must cost proportionally more than a single-item
+// webhook call, without the two buckets interfering with each other.
+export const CATALOG_SYNC_ITEMS_PER_MINUTE = 5000;
+
+export async function logInbound(params: {
   storeId: string;
   integrationId: string | null;
   level: 'info' | 'warning' | 'error';
@@ -59,18 +73,38 @@ async function logInbound(params: {
   });
 }
 
+export interface WebhookAuthOptions<T> {
+  /** Rejects the request before any parsing if the raw body exceeds this many bytes. Omit to skip the check entirely (existing callers' behavior). */
+  maxBodyBytes?: number;
+  /**
+   * Computed from the parsed envelope, *before* the idempotency record is
+   * written — so a batch's rate-limit charge can reflect its actual item
+   * count without ever risking "charged after already recorded as
+   * received". Return `null` to skip the extra charge (e.g. any event
+   * that isn't a batch). Only product.sync uses this; every other caller
+   * omits `options` entirely and gets zero behavior change.
+   */
+  itemCost?: (envelope: T) => number | null;
+}
+
 /**
  * Shared entry point for every /api/webhooks/* route: authenticates the
  * request (API key OR HMAC signature), validates the envelope shape,
  * enforces per-store rate limiting, and records idempotency via the
  * WebhookEvent unique (storeId, eventId) index — see docs/WEBHOOKS.md.
+ * `options` is additive and optional — omitting it (every caller except
+ * the product.sync route) preserves the exact prior behavior.
  */
 export async function authenticateAndDedupeWebhook<T extends WebhookEnvelope>(
   req: NextRequest,
   schema: z.ZodType<T>,
   requiredScope: ApiKeyScope,
+  options?: WebhookAuthOptions<T>,
 ): Promise<WebhookContext<T>> {
   const rawBody = await req.text();
+  if (options?.maxBodyBytes && Buffer.byteLength(rawBody, 'utf8') > options.maxBodyBytes) {
+    throw new ApiError('validation_error', `Request body exceeds the ${options.maxBodyBytes}-byte limit for this endpoint.`);
+  }
 
   let envelope: T;
   try {
@@ -126,6 +160,22 @@ export async function authenticateAndDedupeWebhook<T extends WebhookEnvelope>(
   if (!rl.allowed) {
     await logInbound({ storeId, integrationId, level: 'warning', message: 'Rate limited.' });
     throw new ApiError('rate_limited', 'Too many webhook requests for this store.');
+  }
+
+  // A separate, item-count-aware bucket — deliberately independent of the
+  // flat per-request one above, so a large catalog batch can't drown out
+  // (or be drowned out by) ordinary single-item webhook traffic for the
+  // same store. Must run before the idempotency insert below: if this
+  // request gets rate-limited, it must NOT occupy the (storeId, eventId)
+  // slot, or a legitimate retry after backing off would be misread as a
+  // duplicate of a request that was never actually processed.
+  const itemCost = options?.itemCost?.(envelope) ?? null;
+  if (itemCost !== null) {
+    const catalogRl = consume(`catalog-sync:${storeId}`, CATALOG_SYNC_ITEMS_PER_MINUTE, 60_000, Math.max(itemCost, 1));
+    if (!catalogRl.allowed) {
+      await logInbound({ storeId, integrationId, level: 'warning', message: `Catalog sync rate limited (${itemCost} items requested).` });
+      throw new ApiError('rate_limited', 'Too many product-sync items submitted for this store right now.');
+    }
   }
 
   // Idempotency: the unique (storeId, eventId) index is the source of
