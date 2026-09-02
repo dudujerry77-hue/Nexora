@@ -19,7 +19,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { useStoreScope } from '@/lib/useStores';
+import { useStoreScope, type StoreSummary } from '@/lib/useStores';
 
 const NAV_ITEMS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -33,6 +33,16 @@ const NAV_ITEMS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: '/dashboard/integrations', label: 'Integrations', icon: Plug },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
+
+// The "Connected stores" section must show exactly that — never a
+// disconnected or merely-warning store — using the same canonical derived
+// status (StoreSummary.status, computed server-side by deriveStoreStatus /
+// storeSummary in src/lib/storeService.ts) already used by the Stores page
+// and the Profile dropdown's connected-store count. No separate connection
+// calculation here.
+export function visibleSidebarStores(stores: StoreSummary[]): StoreSummary[] {
+  return stores.filter((s) => s.status === 'connected');
+}
 
 function storeInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -53,6 +63,7 @@ export function Sidebar({ collapsed, onToggleCollapsed, mobileOpen, onCloseMobil
   const router = useRouter();
   const { stores, selectedStoreId, setSelectedStoreId, loading: storesLoading } = useStoreScope();
   const [hovering, setHovering] = useState(false);
+  const connectedStores = visibleSidebarStores(stores);
 
   // The sidebar is fixed/overlaid (both on mobile as a drawer and on
   // desktop when hover-revealing a collapsed rail) so that revealing labels
@@ -133,8 +144,10 @@ export function Sidebar({ collapsed, onToggleCollapsed, mobileOpen, onCloseMobil
           </div>
         ) : stores.length === 0 ? (
           expanded && <p className="px-3 text-xs text-[rgb(var(--text-muted))]">No stores yet</p>
+        ) : connectedStores.length === 0 ? (
+          expanded && <p className="px-3 text-xs text-[rgb(var(--text-muted))]">No connected stores yet</p>
         ) : (
-          stores.map((store) => {
+          connectedStores.map((store) => {
             const active = store.id === selectedStoreId;
             return (
               <button
