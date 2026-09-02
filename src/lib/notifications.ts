@@ -20,6 +20,10 @@ export async function createNotification(params: {
       body: params.body,
       severity: params.severity ?? 'info',
     },
+    // The live SSE payload needs the originating store's name too — the
+    // notification bell renders it immediately, not just after the next
+    // GET /api/notifications fetch (see NotificationBell.tsx).
+    include: { store: { select: { id: true, name: true } } },
   });
 
   eventBus.publish({

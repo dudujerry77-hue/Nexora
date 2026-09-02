@@ -2,15 +2,22 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { prisma } from '@/lib/db';
 import { decryptSecret } from '@/lib/crypto';
 import { signWebhookBody } from '@/lib/webhookSignature';
-import { resetDb, registerUser, createStore, createIntegration, buildRequest } from './helpers';
+import { resetDb, registerUser, createStore, createIntegration, connectIntegration, buildRequest } from './helpers';
 
 describe('products', () => {
   beforeEach(resetDb);
 
+  // Product creation now requires a connected store (see
+  // tests/productStoreScoping.test.ts's dedicated "creation requires a
+  // connected store" tests) — most tests in this file are about product
+  // *shape*, not that gate, so this setup connects a store up front.
   async function setup() {
     const owner = await registerUser({ name: 'Prod Owner', email: 'prod-owner@example.com', password: 'password123', orgName: 'Prod Org' });
     const store = await createStore(owner.jar, { name: 'Prod Store' });
-    return { owner, storeId: store.body.data.id as string };
+    const storeId = store.body.data.id as string;
+    const integration = await createIntegration(owner.jar, { storeId, provider: 'js_sdk' });
+    await connectIntegration(integration.body.data.integration.id);
+    return { owner, storeId };
   }
 
   it('creates a product with images, categories, and variants', async () => {

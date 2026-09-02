@@ -9,6 +9,7 @@ export interface SessionUser {
   name: string;
   email: string;
   role: string;
+  avatarUrl: string | null;
 }
 
 export interface SessionOrganization {

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Package, Plug, Pencil, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Package, Plug, Pencil, Trash2, CloudOff } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
@@ -11,6 +12,16 @@ import { ProductFormModal, type EditableProduct } from '@/components/dashboard/P
 interface Product extends EditableProduct {
   currency: string;
 }
+
+// No connector in this codebase (custom_api, custom_webhook, js_sdk — see
+// src/lib/connectors) exposes an outbound "push this product to the
+// developer's own website" capability; the whole integration architecture
+// is inbound-only (developer's system -> Nexora), and there is nowhere to
+// even store a destination URL to push to. Rather than fake a push button
+// that can never actually succeed, the "Push to website" action is shown
+// disabled with an honest explanation until a real outbound capability
+// exists. Flip this — and wire up a real endpoint — if that ever changes.
+const OUTBOUND_PRODUCT_PUSH_SUPPORTED = false;
 
 export default function ProductsPage() {
   const { selectedStoreId, stores } = useStoreScope();
@@ -22,6 +33,14 @@ export default function ProductsPage() {
 
   const store = stores.find((s) => s.id === selectedStoreId);
   const developerOwned = store?.productMode === 'developer_owned';
+  // Same canonical derived status shown on the Stores page and Profile
+  // dropdown (GET /api/stores' deriveStoreStatus) — a store with zero (or
+  // only stale/failing) integrations is not "connected", regardless of
+  // productMode. Creation requires both nexora_managed AND connected; see
+  // assertStoreEligibleForProductCreation in src/lib/productService.ts for
+  // the server-side twin of this check.
+  const notConnected = Boolean(store) && !developerOwned && store!.status !== 'connected';
+  const canCreate = Boolean(selectedStoreId) && !developerOwned && !notConnected;
 
   function load() {
     setLoading(true);
@@ -57,12 +76,43 @@ export default function ProductsPage() {
             {developerOwned ? 'Synced from your connected integration.' : 'Products managed in this dashboard.'}
           </p>
         </div>
-        {!developerOwned && selectedStoreId && (
-          <button onClick={() => setModalProduct(null)} className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
+        {!developerOwned && (
+          <button
+            onClick={() => setModalProduct(null)}
+            disabled={!canCreate}
+            title={!selectedStoreId ? 'Create or select a store first.' : notConnected ? 'This store has no connected integration yet.' : undefined}
+            className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
             + New product
           </button>
         )}
       </div>
+
+      {!developerOwned && !selectedStoreId && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-400/50 bg-amber-50 p-4 text-sm dark:bg-amber-900/20">
+          <Package className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" strokeWidth={1.75} aria-hidden="true" />
+          <p>
+            You don&apos;t have a store yet.{' '}
+            <Link href="/dashboard/stores" className="font-medium underline">
+              Create one
+            </Link>{' '}
+            before adding products — every product must belong to a specific store.
+          </p>
+        </div>
+      )}
+
+      {!developerOwned && notConnected && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-400/50 bg-amber-50 p-4 text-sm dark:bg-amber-900/20">
+          <Package className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" strokeWidth={1.75} aria-hidden="true" />
+          <p>
+            <span className="font-medium">{store!.name}</span> has no connected integration yet.{' '}
+            <Link href="/dashboard/integrations" className="font-medium underline">
+              Connect one
+            </Link>{' '}
+            before creating products for this store.
+          </p>
+        </div>
+      )}
 
       {developerOwned && (
         <div className="flex items-start gap-3 rounded-lg border border-[rgb(var(--border))] bg-black/[0.02] p-4 text-sm dark:bg-white/[0.03]">
@@ -140,20 +190,31 @@ export default function ProductsPage() {
                   </p>
 
                   {!developerOwned && (
-                    <div className="flex gap-2 border-t border-[rgb(var(--border))] pt-2">
+                    <div className="space-y-2 border-t border-[rgb(var(--border))] pt-2">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setModalProduct(p)}
+                          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[rgb(var(--border))] py-1.5 text-xs font-medium"
+                        >
+                          <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteProduct(p)}
+                          aria-label={`Delete ${p.name}`}
+                          className="flex items-center justify-center rounded-lg border border-red-400/50 px-2 text-red-500"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                        </button>
+                      </div>
                       <button
-                        onClick={() => setModalProduct(p)}
-                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[rgb(var(--border))] py-1.5 text-xs font-medium"
+                        type="button"
+                        disabled={!OUTBOUND_PRODUCT_PUSH_SUPPORTED}
+                        title="Outbound sync isn't supported by any connected integration yet — products created here stay in Nexora only."
+                        className="flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-dashed border-[rgb(var(--border))] py-1.5 text-xs font-medium text-[rgb(var(--text-muted))] opacity-70"
                       >
-                        <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => deleteProduct(p)}
-                        aria-label={`Delete ${p.name}`}
-                        className="flex items-center justify-center rounded-lg border border-red-400/50 px-2 text-red-500"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                        <CloudOff className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                        Outbound sync not supported yet
                       </button>
                     </div>
                   )}

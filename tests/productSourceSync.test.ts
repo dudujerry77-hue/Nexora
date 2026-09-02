@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { prisma } from '@/lib/db';
 import { decryptSecret } from '@/lib/crypto';
 import { signWebhookBody } from '@/lib/webhookSignature';
-import { resetDb, registerUser, createStore, createIntegration, buildRequest } from './helpers';
+import { resetDb, registerUser, createStore, createIntegration, connectIntegration, buildRequest } from './helpers';
 
 describe('product webhook sync — sourceUpdatedAt staleness + tightened validation', () => {
   beforeEach(resetDb);
@@ -147,6 +147,11 @@ describe('product webhook sync — sourceUpdatedAt staleness + tightened validat
 
   it('leaves the existing dashboard/session product form (data: URL uploads) unaffected', async () => {
     const { owner, storeId } = await setup();
+    // setup()'s custom_webhook integration has no real traffic yet — connect
+    // it first so this test exercises only what it says it tests (data: URL
+    // handling), not the separate connected-store creation gate.
+    const integration = await prisma.integration.findFirstOrThrow({ where: { storeId } });
+    await connectIntegration(integration.id);
     const { POST } = await import('@/app/api/products/route');
     const res = await POST(
       buildRequest('/api/products', {

@@ -22,6 +22,10 @@ model User {
   email        String   @unique
   passwordHash String
   name         String
+  // http(s) URL or a small data: URL (device upload) — same accepted shapes
+  // as a product image, see productImageSchema in src/lib/validation.ts.
+  // Null renders as the existing initials avatar.
+  avatarUrl    String?
   role         String   @default("OWNER")
   createdAt    DateTime @default(now())
 

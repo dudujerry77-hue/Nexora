@@ -1,14 +1,145 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Lock, FileText, Store as StoreIcon } from 'lucide-react';
+import { Lock, FileText, Store as StoreIcon, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apiClient';
 import { useSession } from '@/lib/useSession';
 import { useStoreScope } from '@/lib/useStores';
 import { useToast } from '@/components/Toast';
 import { EmptyState, LoadingSkeleton } from '@/components/dashboard/ui';
 import { MonitoringPanel } from '@/components/dashboard/MonitoringPanel';
+
+const MAX_AVATAR_BYTES = 1_500_000; // matches PATCH /api/auth/me's bound
+
+function initialsFor(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+/**
+ * The real, smallest-foundation profile-picture feature: User.avatarUrl is
+ * a genuine, persisted column (see prisma/schema.prisma) — this is not a
+ * fake upload. Accepts the same shapes the product-image field already
+ * does (http(s) URL, or a small device upload turned into a data: URL),
+ * reusing that existing pattern rather than inventing new storage.
+ */
+function ProfilePictureSettings() {
+  const { session } = useSession();
+  const { push } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [urlInput, setUrlInput] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  if (!session) return null;
+  const avatarUrl = session.user.avatarUrl;
+
+  async function save(next: string | null) {
+    setSaving(true);
+    const res = await apiFetch('/api/auth/me', { method: 'PATCH', body: JSON.stringify({ avatarUrl: next }) });
+    setSaving(false);
+    if (res.error) {
+      push(res.error.message, 'error');
+      return;
+    }
+    push(next ? 'Profile picture updated.' : 'Profile picture removed.', 'success');
+    setUrlInput('');
+    // useSession() only fetches once on mount and has no refetch — a full
+    // reload is the simplest correct way to get the new avatar into the
+    // layout's ProfileMenu without introducing a new session-refresh
+    // mechanism for this one low-frequency action.
+    window.location.reload();
+  }
+
+  function handleFile(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      push('Please choose an image file.', 'error');
+      return;
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      push(`Image is too large (max ${Math.round(MAX_AVATAR_BYTES / 1_000_000)}MB).`, 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') save(reader.result);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function saveUrl() {
+    const url = urlInput.trim();
+    if (!url) return;
+    if (!/^https?:\/\//.test(url)) {
+      push('Image URL must start with http:// or https://', 'error');
+      return;
+    }
+    save(url);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-lg font-semibold text-white">
+        {avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          initialsFor(session.user.name)
+        )}
+      </span>
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-lg border border-[rgb(var(--border))] px-3 py-1.5 text-xs font-medium disabled:opacity-60"
+          >
+            {avatarUrl ? 'Change picture' : 'Add picture'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => handleFile(e.target.files)}
+          />
+          {avatarUrl && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => save(null)}
+              className="flex items-center gap-1.5 rounded-lg border border-red-400/50 px-3 py-1.5 text-xs font-medium text-red-500 disabled:opacity-60"
+            >
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+              Remove
+            </button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            placeholder="Or paste an image URL"
+            className="min-w-0 flex-1 rounded-lg border border-[rgb(var(--border))] bg-transparent px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            disabled={saving || !urlInput.trim()}
+            onClick={saveUrl}
+            className="shrink-0 rounded-lg border border-[rgb(var(--border))] px-3 py-2 text-sm font-medium disabled:opacity-60"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface AuditLog {
   id: string;
@@ -220,6 +351,9 @@ function SettingsPageContent() {
 
       <div className="card p-5">
         <h2 className="mb-4 font-semibold">Account</h2>
+        <div className="mb-5 border-b border-[rgb(var(--border))] pb-5">
+          <ProfilePictureSettings />
+        </div>
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <div>
             <dt className="text-xs text-[rgb(var(--text-muted))]">Name</dt>

@@ -101,3 +101,15 @@ export async function createIntegration(jar: CookieJar, params: { storeId: strin
   const body = await res.clone().json();
   return { res, body };
 }
+
+// A freshly-created integration has no recorded activity yet, so
+// deriveStoreStatus (src/lib/integrations.ts) correctly reports it as
+// "disconnected" until a real request/webhook/monitoring event touches it —
+// see tests/storeStatus.test.ts. Tests whose actual subject is something
+// else (product creation, order flow, ...) but that still need a genuinely
+// "connected" store to get past that gate simulate that one real event
+// having already landed, the same way storeStatus.test.ts backdates
+// lastRequestAt to simulate staleness in the other direction.
+export async function connectIntegration(integrationId: string) {
+  await prisma.integration.update({ where: { id: integrationId }, data: { lastRequestAt: new Date() } });
+}

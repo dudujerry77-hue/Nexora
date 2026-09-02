@@ -4,6 +4,7 @@ import { prisma } from './db';
 import { ApiError } from './errors';
 import { toJson, fromJson } from './json';
 import type { CanonicalProduct } from './connectors/types';
+import type { ConnectionStatus } from './integrations';
 
 /** Parses a Product row's JSON-as-TEXT columns for API responses. */
 export function serializeProduct<T extends Product>(product: T) {
@@ -33,6 +34,29 @@ export function assertNexoraManagedProductWrites(store: { productMode: string })
     throw new ApiError(
       'forbidden',
       'This store is developer-owned — its product catalog syncs in via POST /api/webhooks/products, not through the create/edit product management endpoints.',
+    );
+  }
+}
+
+/**
+ * Guards product *creation* specifically: a store must be productMode
+ * nexora_managed (assertNexoraManagedProductWrites, reused not duplicated)
+ * AND have a currently-connected integration (the same canonical
+ * deriveStoreStatus/computeStatus result already shown on the Stores page
+ * and Profile dropdown — pass it in rather than recomputing it here, so
+ * there is only ever one place that decides what "connected" means).
+ *
+ * Deliberately scoped to creation only (POST /api/products), not
+ * PATCH/DELETE — editing or removing an already-existing product isn't
+ * gated by this, since the product already legitimately exists regardless
+ * of the store's current connection state.
+ */
+export function assertStoreEligibleForProductCreation(store: { productMode: string }, derivedStatus: ConnectionStatus): void {
+  assertNexoraManagedProductWrites(store);
+  if (derivedStatus !== 'connected') {
+    throw new ApiError(
+      'forbidden',
+      'This store has no successfully connected integration yet — connect one (Integrations page) before creating products.',
     );
   }
 }

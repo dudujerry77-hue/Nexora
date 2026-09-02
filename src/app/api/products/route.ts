@@ -7,7 +7,8 @@ import { ok, fail } from '@/lib/apiResponse';
 import { ApiError } from '@/lib/errors';
 import { consume } from '@/lib/rateLimit';
 import { toJson } from '@/lib/json';
-import { serializeProduct } from '@/lib/productService';
+import { serializeProduct, assertStoreEligibleForProductCreation } from '@/lib/productService';
+import { storeSummary } from '@/lib/storeService';
 
 // These routes read the session cookie, so they can never be statically
 // generated — declare that explicitly to avoid Next's build-time
@@ -84,13 +85,23 @@ export async function POST(req: NextRequest) {
       if (!rl.allowed) throw new ApiError('rate_limited', 'API key rate limit exceeded.');
       const body = createProductSchema.parse(await req.json());
       if (body.storeId !== apiKeyCtx.storeId) throw new ApiError('forbidden', 'API key not authorized for this store.');
+      // Same product-ownership + connected-store rule as the session path
+      // below, now applied consistently regardless of auth method — see
+      // assertStoreEligibleForProductCreation in src/lib/productService.ts
+      // for why this doesn't affect the real developer-owned sync channel
+      // (POST /api/webhooks/products), which stays ungated by either rule.
+      const store = await prisma.store.findUniqueOrThrow({ where: { id: apiKeyCtx.storeId } });
+      const { status } = await storeSummary(store.id);
+      assertStoreEligibleForProductCreation(store, status);
       const product = await createProduct(apiKeyCtx.storeId, body);
       return ok(serializeProduct(product), 201);
     }
 
     const { member } = await requireSession(req);
     const body = createProductSchema.parse(await req.json());
-    await assertStoreAccess({ member, storeId: body.storeId, permission: 'manage_products' });
+    const store = await assertStoreAccess({ member, storeId: body.storeId, permission: 'manage_products' });
+    const { status } = await storeSummary(store.id);
+    assertStoreEligibleForProductCreation(store, status);
     const product = await createProduct(body.storeId, body);
     return ok(serializeProduct(product), 201);
   } catch (error) {

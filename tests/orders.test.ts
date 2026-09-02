@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { prisma } from '@/lib/db';
-import { resetDb, buildRequest, registerUser, createStore, createIntegration } from './helpers';
+import { resetDb, buildRequest, registerUser, createStore, createIntegration, connectIntegration } from './helpers';
 
 describe('orders', () => {
   beforeEach(resetDb);
@@ -9,6 +9,7 @@ describe('orders', () => {
     const owner = await registerUser({ name: 'Owner', email: 'orders-owner@example.com', password: 'password123', orgName: 'Orders Org' });
     const store = await createStore(owner.jar, { name: 'Iya Kudinka Restaurant', type: 'restaurant' });
     const integration = await createIntegration(owner.jar, { storeId: store.body.data.id, provider: 'custom_api' });
+    await connectIntegration(integration.body.data.integration.id); // this test is about order flow, not the product-creation gate
 
     const { POST: postProduct } = await import('@/app/api/products/route');
     await postProduct(

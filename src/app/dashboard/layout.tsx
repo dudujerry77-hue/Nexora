@@ -40,6 +40,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [storesLoading, setStoresLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Notification bell and profile dropdown are mutually exclusive — opening
+  // one closes the other (section 16). A single "which one is open" slot
+  // (rather than two independent booleans) makes that exclusivity
+  // structural instead of something each component has to coordinate.
+  const [openHeaderDropdown, setOpenHeaderDropdown] = useState<'notifications' | 'profile' | null>(null);
 
   useEffect(() => {
     try {
@@ -137,13 +142,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <StoreSwitcher />
             </div>
             <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
-              <NotificationBell />
+              <NotificationBell
+                open={openHeaderDropdown === 'notifications'}
+                onOpenChange={(v) => setOpenHeaderDropdown(v ? 'notifications' : null)}
+              />
               <ThemeToggle />
               <ProfileMenu
                 name={session.user.name}
                 email={session.user.email}
                 role={session.memberRole}
                 organizationName={session.organization?.name}
+                avatarUrl={session.user.avatarUrl}
+                open={openHeaderDropdown === 'profile'}
+                onOpenChange={(v) => setOpenHeaderDropdown(v ? 'profile' : null)}
               />
             </div>
           </header>
