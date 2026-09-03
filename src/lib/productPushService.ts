@@ -155,6 +155,33 @@ export interface PushBatchResult {
   results: PushItemResult[];
 }
 
+// "Push All" must never execute an unbounded catalog in one request — each
+// item is a real outbound network call (up to OUTBOUND_PUSH_TIMEOUT_MS in
+// src/lib/connectors/nexoraNative.ts), so an uncapped batch has an
+// uncapped worst-case request duration. Deliberately smaller than "Push
+// Selected"'s MAX_PUSH_SELECTED_BATCH_SIZE (500, an explicit, deliberate
+// per-item user choice) since "all" can be triggered against a catalog of
+// any size without the user having considered how large it is — see
+// src/app/api/products/push/route.ts for how a store with more eligible
+// products than this gets `truncated: true` and must be pushed again to
+// continue, rather than silently dropping the remainder.
+export const MAX_PUSH_ALL_BATCH_SIZE = 50;
+
+// Selected mode's cap is enforced by pushProductsSchema in validation.ts
+// (productIds.max(500)) — re-exported here purely so the route and this
+// module share one named constant instead of two independent literals.
+export const MAX_PUSH_SELECTED_BATCH_SIZE = 500;
+
+// Per-store outbound-push rate limit — same consume() token-bucket
+// infrastructure already used for inbound webhook traffic (see
+// CATALOG_SYNC_ITEMS_PER_MINUTE in src/lib/webhookAuth.ts), charged by item
+// count so "Push All" can't bypass it by simply requesting a large batch.
+// Deliberately much lower than CATALOG_SYNC_ITEMS_PER_MINUTE (5000): each
+// item here is a real outbound network call to a merchant-controlled
+// destination, not a local database write, so the two are not
+// comparable costs.
+export const PRODUCT_PUSH_ITEMS_PER_MINUTE = 1000;
+
 /**
  * Pushes exactly the given product ids (already verified by the caller to
  * belong to `storeId` — this function does not re-check store ownership).

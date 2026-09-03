@@ -17,7 +17,9 @@ interface CapturedRequest {
   rawBody: string;
 }
 
-function startTestServer(handler: (req: CapturedRequest) => { status: number; body?: unknown } | 'timeout') {
+function startTestServer(
+  handler: (req: CapturedRequest) => { status: number; body?: unknown; headers?: Record<string, string> } | 'timeout',
+) {
   const captured: CapturedRequest[] = [];
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -27,7 +29,7 @@ function startTestServer(handler: (req: CapturedRequest) => { status: number; bo
       captured.push({ headers: req.headers, rawBody });
       const result = handler({ headers: req.headers, rawBody });
       if (result === 'timeout') return; // never respond — the client-side AbortSignal.timeout will fire
-      res.writeHead(result.status, { 'content-type': 'application/json' });
+      res.writeHead(result.status, { 'content-type': 'application/json', ...result.headers });
       res.end(result.body !== undefined ? JSON.stringify(result.body) : undefined);
     });
   });
@@ -143,6 +145,32 @@ describe('real outbound webhook push connector (Phase 2)', () => {
     expect(result.data.pushed).toBe(0);
     expect(result.data.failed).toBe(1);
     expect(result.data.results[0]).toMatchObject({ status: 'failed', error: 'SKU already exists with conflicting data' });
+
+    const product = await prisma.product.findUniqueOrThrow({ where: { id: productId } });
+    expect(product.pushStatus).toBe('failed');
+  });
+
+  it('never follows a redirect toward a blocked/private destination — a 3xx is reported failed, not chased', async () => {
+    const { owner, storeId, integrationId } = await setup();
+    const server = await startTestServer(() => ({
+      status: 302,
+      headers: { location: 'http://169.254.169.254/latest/meta-data/' },
+      body: { status: 'ok', action: 'created' }, // even if the body looked like success, a 3xx must never be treated as one
+    }));
+    servers.push(server);
+    await configureOutbound(owner, integrationId, server.url);
+    const productId = await createProduct(owner, storeId, 'REDIRECT-1');
+
+    const result = await push(owner, storeId, [productId]);
+    // Exactly one request ever reached the real server — proving the 302's
+    // Location header was never dereferenced into a second request at all
+    // (this codebase's outbound transport is Node's raw http/https client,
+    // which — unlike fetch — never auto-follows redirects; see
+    // src/lib/ssrfSafeFetch.ts sendSafeRequest).
+    expect(server.captured).toHaveLength(1);
+    expect(result.data.pushed).toBe(0);
+    expect(result.data.failed).toBe(1);
+    expect(result.data.results[0].status).toBe('failed');
 
     const product = await prisma.product.findUniqueOrThrow({ where: { id: productId } });
     expect(product.pushStatus).toBe('failed');

@@ -1,5 +1,6 @@
 import { Connector, CanonicalProduct, PushProductContext, PushProductResult, PushVerificationError } from './types';
 import { signWebhookBody } from '../webhookSignature';
+import { resolveSafeOutboundTarget, sendSafeRequest, BlockedDestinationError } from '../ssrfSafeFetch';
 
 // The three implemented MVP integration paths (custom_api, custom_webhook,
 // js_sdk) all speak Nexora's own canonical payload shape already — see
@@ -109,9 +110,21 @@ async function pushProductViaCustomWebhook(product: CanonicalProduct, context: P
   const rawBody = JSON.stringify({ event: 'product.push', data: product });
   const signature = signWebhookBody(secret, timestamp, rawBody);
 
-  let response: Response;
+  // Resolve + validate BEFORE ever touching the network — see
+  // ../ssrfSafeFetch.ts for the full SSRF threat model (loopback/private/
+  // link-local/metadata ranges, HTTPS-only, DNS-rebinding-proof address
+  // pinning, no redirect-following).
+  let target;
   try {
-    response = await fetch(url, {
+    target = await resolveSafeOutboundTarget(url);
+  } catch (error) {
+    if (error instanceof BlockedDestinationError) throw error; // a definitive, self-inflicted rejection — not ambiguous, so not "unverifiable"
+    throw new PushVerificationError('Could not resolve the destination address.');
+  }
+
+  let response: { status: number; body: string };
+  try {
+    response = await sendSafeRequest(target, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -119,7 +132,7 @@ async function pushProductViaCustomWebhook(product: CanonicalProduct, context: P
         'x-nexora-timestamp': String(timestamp),
       },
       body: rawBody,
-      signal: AbortSignal.timeout(OUTBOUND_PUSH_TIMEOUT_MS),
+      timeoutMs: OUTBOUND_PUSH_TIMEOUT_MS,
     });
   } catch (error) {
     // Network failure/timeout — we genuinely don't know whether the
@@ -129,11 +142,11 @@ async function pushProductViaCustomWebhook(product: CanonicalProduct, context: P
     );
   }
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     let message = `Destination responded with HTTP ${response.status}.`;
     try {
-      const body = (await response.json()) as { error?: string };
-      if (typeof body?.error === 'string') message = body.error;
+      const errorBody = JSON.parse(response.body) as { error?: string };
+      if (typeof errorBody?.error === 'string') message = errorBody.error;
     } catch {
       // Non-JSON error body — keep the generic HTTP-status message.
     }
@@ -142,7 +155,7 @@ async function pushProductViaCustomWebhook(product: CanonicalProduct, context: P
 
   let body: unknown;
   try {
-    body = await response.json();
+    body = JSON.parse(response.body);
   } catch {
     throw new PushVerificationError('Destination returned a 2xx response but no parseable confirmation body.');
   }
